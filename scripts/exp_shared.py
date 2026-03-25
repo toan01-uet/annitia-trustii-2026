@@ -510,3 +510,1058 @@ def log_experiment_to_wandb(
         "api_key_valid": wandb_api_key_valid(),
         "artifact_paths": [str(path.relative_to(PROJECT_ROOT)) for path in artifact_paths if path.exists()],
     }
+
+
+# ---------------------------------------------------------------------------
+# Feature engineering functions for exp003-exp031
+# ---------------------------------------------------------------------------
+
+
+def add_visit_minmax_mean_std_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    visit_groups = visit_column_groups(df.columns)
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    for base, cols in visit_groups.items():
+        float_cols = [pl.col(c).cast(pl.Float64, strict=False) for c in cols]
+        min_name = f"{base}_visit_min"
+        max_name = f"{base}_visit_max"
+        mean_name = f"{base}_visit_mean"
+        std_name = f"{base}_visit_std"
+        range_name = f"{base}_visit_range"
+        exprs.append(pl.min_horizontal(*float_cols).alias(min_name))
+        exprs.append(pl.max_horizontal(*float_cols).alias(max_name))
+        exprs.append(pl.concat_list(float_cols).list.mean().alias(mean_name))
+        exprs.append(pl.concat_list(float_cols).list.std(ddof=1).alias(std_name))
+        exprs.append((pl.max_horizontal(*float_cols) - pl.min_horizontal(*float_cols)).alias(range_name))
+        names.extend([min_name, max_name, mean_name, std_name, range_name])
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_visit_slope_trend_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    visit_groups = visit_column_groups(df.columns)
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    for base in visit_groups:
+        delta_col = f"{base}_delta_last_first"
+        count_col = f"{base}_observed_count"
+        mean_col = f"{base}_visit_mean"
+        std_col = f"{base}_visit_std"
+        if delta_col not in df.columns or count_col not in df.columns:
+            continue
+        slope_name = f"{base}_slope_proxy"
+        pos_name = f"{base}_trend_positive"
+        neg_name = f"{base}_trend_negative"
+        exprs.append(
+            (pl.col(delta_col).cast(pl.Float64, strict=False) / pl.col(count_col).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0)).alias(slope_name)
+        )
+        exprs.append((pl.col(delta_col).cast(pl.Float64, strict=False) > 0).cast(pl.Float64).alias(pos_name))
+        exprs.append((pl.col(delta_col).cast(pl.Float64, strict=False) < 0).cast(pl.Float64).alias(neg_name))
+        names.extend([slope_name, pos_name, neg_name])
+        if mean_col in df.columns and std_col in df.columns:
+            cv_name = f"{base}_cv"
+            exprs.append(
+                (
+                    pl.col(std_col).cast(pl.Float64, strict=False) /
+                    pl.col(mean_col).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0)
+                ).alias(cv_name)
+            )
+            names.append(cv_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_visit_recency_persistence_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    visit_groups = visit_column_groups(df.columns)
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    for base, cols in visit_groups.items():
+        total = len(cols)
+        count_col = f"{base}_observed_count"
+        if count_col not in df.columns:
+            continue
+        persist_name = f"{base}_persistence"
+        exprs.append((pl.col(count_col).cast(pl.Float64, strict=False) / float(total)).alias(persist_name))
+        names.append(persist_name)
+        mid = total // 2
+        early_cols = cols[:mid] if mid > 0 else cols[:1]
+        late_cols = cols[mid:] if mid < total else cols[-1:]
+        if early_cols:
+            early_name = f"{base}_early_coverage"
+            early_count = sum(pl.col(c).is_not_null().cast(pl.Int16) for c in early_cols)
+            exprs.append((early_count.cast(pl.Float64) / float(len(early_cols))).alias(early_name))
+            names.append(early_name)
+        if late_cols:
+            late_name = f"{base}_late_coverage"
+            late_count = sum(pl.col(c).is_not_null().cast(pl.Int16) for c in late_cols)
+            exprs.append((late_count.cast(pl.Float64) / float(len(late_cols))).alias(late_name))
+            names.append(late_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_visit_missingness_trajectory_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    visit_groups = visit_column_groups(df.columns)
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    for base, cols in visit_groups.items():
+        first_visit_expr = pl.lit(0.0)
+        last_visit_expr = pl.lit(0.0)
+        for i, c in enumerate(cols, start=1):
+            not_null = pl.col(c).is_not_null()
+            first_visit_expr = pl.when(first_visit_expr == 0.0).then(pl.when(not_null).then(pl.lit(float(i))).otherwise(pl.lit(0.0))).otherwise(first_visit_expr)
+            last_visit_expr = pl.when(not_null).then(pl.lit(float(i))).otherwise(last_visit_expr)
+        fov_name = f"{base}_first_observed_visit"
+        lov_name = f"{base}_last_observed_visit"
+        span_name = f"{base}_obs_span"
+        exprs.append(first_visit_expr.alias(fov_name))
+        exprs.append(last_visit_expr.alias(lov_name))
+        exprs.append((last_visit_expr - first_visit_expr).alias(span_name))
+        names.extend([fov_name, lov_name, span_name])
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_missingness_flag_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    visit_groups = visit_column_groups(df.columns)
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    panel_coverage_exprs: list[pl.Expr] = []
+    for base, cols in visit_groups.items():
+        all_null_name = f"{base}_all_null_flag"
+        any_obs_name = f"{base}_any_observed_flag"
+        null_checks = [pl.col(c).is_null() for c in cols]
+        all_null_expr = pl.all_horizontal(*null_checks).cast(pl.Float64)
+        any_obs_expr = (~pl.all_horizontal(*null_checks)).cast(pl.Float64)
+        exprs.append(all_null_expr.alias(all_null_name))
+        exprs.append(any_obs_expr.alias(any_obs_name))
+        names.extend([all_null_name, any_obs_name])
+        count_col = f"{base}_observed_count"
+        if count_col in df.columns:
+            panel_coverage_exprs.append(pl.col(count_col).cast(pl.Float64, strict=False) / float(len(cols)))
+    if panel_coverage_exprs:
+        coverage_name = "total_panel_coverage"
+        exprs.append(pl.concat_list(panel_coverage_exprs).list.mean().alias(coverage_name))
+        names.append(coverage_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_log_winsorized_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    biomarkers = ["alt", "ast", "ggt", "bilirubin", "triglyc", "gluc_fast", "plt", "BMI", "chol"]
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    for base in biomarkers:
+        mean_col = f"{base}_visit_mean"
+        first_col = f"{base}_first_non_null"
+        src_col = mean_col if mean_col in df.columns else (first_col if first_col in df.columns else None)
+        if src_col is None:
+            continue
+        log_name = f"log1p_{base}"
+        exprs.append(pl.col(src_col).cast(pl.Float64, strict=False).clip(lower_bound=0.0).log1p().alias(log_name))
+        names.append(log_name)
+        series = df.get_column(src_col).cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        if len(series) > 0:
+            p1 = float(np.nanpercentile(series, 1))
+            p99 = float(np.nanpercentile(series, 99))
+            wins_name = f"wins_{base}"
+            exprs.append(pl.col(src_col).cast(pl.Float64, strict=False).clip(lower_bound=p1, upper_bound=p99).alias(wins_name))
+            names.append(wins_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_clinical_burden_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    burden_cols = ["T2DM", "Hypertension", "Dyslipidaemia", "bariatric_surgery"]
+    available = [c for c in burden_cols if c in df.columns]
+    if not available:
+        return df, []
+    bool_exprs = [pl.col(c).cast(pl.Float64, strict=False).fill_null(0.0) > 0.0 for c in available]
+    count_name = "comorbidity_count"
+    score_name = "comorbidity_burden_score"
+    weights = {"T2DM": 2.0, "Hypertension": 1.0, "Dyslipidaemia": 1.0, "bariatric_surgery": 1.0}
+    weight_exprs = [pl.col(c).cast(pl.Float64, strict=False).fill_null(0.0) * weights.get(c, 1.0) for c in available]
+    count_expr = pl.sum_horizontal(*bool_exprs).cast(pl.Float64).alias(count_name)
+    score_expr = pl.sum_horizontal(*weight_exprs).alias(score_name)
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), count_expr, score_expr).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, [count_name, score_name]
+
+
+def add_metabolic_burden_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    bmi_col = "BMI_visit_mean" if "BMI_visit_mean" in df.columns else ("BMI_first_non_null" if "BMI_first_non_null" in df.columns else None)
+    gluc_col = "gluc_fast_visit_mean" if "gluc_fast_visit_mean" in df.columns else ("gluc_fast_first_non_null" if "gluc_fast_first_non_null" in df.columns else None)
+    trig_col = "triglyc_visit_mean" if "triglyc_visit_mean" in df.columns else ("triglyc_first_non_null" if "triglyc_first_non_null" in df.columns else None)
+    flag_exprs: list[pl.Expr] = []
+    if bmi_col:
+        flag_exprs.append((pl.col(bmi_col).cast(pl.Float64, strict=False) >= 30.0).cast(pl.Float64).fill_null(0.0))
+        exprs.append((pl.col(bmi_col).cast(pl.Float64, strict=False) >= 30.0).cast(pl.Float64).fill_null(0.0).alias("obese_flag"))
+        names.append("obese_flag")
+    if gluc_col:
+        flag_exprs.append((pl.col(gluc_col).cast(pl.Float64, strict=False) >= 7.0).cast(pl.Float64).fill_null(0.0))
+        exprs.append((pl.col(gluc_col).cast(pl.Float64, strict=False) >= 7.0).cast(pl.Float64).fill_null(0.0).alias("high_glucose_flag"))
+        names.append("high_glucose_flag")
+    if trig_col:
+        flag_exprs.append((pl.col(trig_col).cast(pl.Float64, strict=False) >= 1.7).cast(pl.Float64).fill_null(0.0))
+        exprs.append((pl.col(trig_col).cast(pl.Float64, strict=False) >= 1.7).cast(pl.Float64).fill_null(0.0).alias("high_triglyc_flag"))
+        names.append("high_triglyc_flag")
+    if "T2DM" in df.columns:
+        flag_exprs.append(pl.col("T2DM").cast(pl.Float64, strict=False).fill_null(0.0))
+    if "Dyslipidaemia" in df.columns:
+        flag_exprs.append(pl.col("Dyslipidaemia").cast(pl.Float64, strict=False).fill_null(0.0))
+    if flag_exprs:
+        exprs.append(pl.sum_horizontal(*flag_exprs).cast(pl.Float64).alias("metabolic_burden_score"))
+        names.append("metabolic_burden_score")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_inflammatory_burden_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    thresholds = {
+        "alt": ("alt_visit_mean", "alt_first_non_null", 40.0, "high_alt_flag"),
+        "ast": ("ast_visit_mean", "ast_first_non_null", 40.0, "high_ast_flag"),
+        "ggt": ("ggt_visit_mean", "ggt_first_non_null", 50.0, "high_ggt_flag"),
+        "bilirubin": ("bilirubin_visit_mean", "bilirubin_first_non_null", 1.2, "high_bilirubin_flag"),
+    }
+    flag_exprs: list[pl.Expr] = []
+    for _, (mean_c, first_c, thresh, flag_name) in thresholds.items():
+        src = mean_c if mean_c in df.columns else (first_c if first_c in df.columns else None)
+        if src is None:
+            continue
+        flag = (pl.col(src).cast(pl.Float64, strict=False) > thresh).cast(pl.Float64).fill_null(0.0)
+        exprs.append(flag.alias(flag_name))
+        names.append(flag_name)
+        flag_exprs.append(flag)
+    if flag_exprs:
+        exprs.append(pl.sum_horizontal(*flag_exprs).cast(pl.Float64).alias("inflammatory_burden_score"))
+        names.append("inflammatory_burden_score")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_cardio_burden_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    flag_exprs: list[pl.Expr] = []
+    if "Hypertension" in df.columns:
+        flag = pl.col("Hypertension").cast(pl.Float64, strict=False).fill_null(0.0)
+        flag_exprs.append(flag)
+    chol_col = "chol_visit_mean" if "chol_visit_mean" in df.columns else ("chol_first_non_null" if "chol_first_non_null" in df.columns else None)
+    if chol_col:
+        flag = (pl.col(chol_col).cast(pl.Float64, strict=False) > 5.0).cast(pl.Float64).fill_null(0.0)
+        exprs.append(flag.alias("high_chol_flag"))
+        names.append("high_chol_flag")
+        flag_exprs.append(flag)
+    aix_col = "aixp_aix_result_BM_3_visit_mean" if "aixp_aix_result_BM_3_visit_mean" in df.columns else (
+        "aixp_aix_result_BM_3_first_non_null" if "aixp_aix_result_BM_3_first_non_null" in df.columns else None
+    )
+    if aix_col:
+        flag = (pl.col(aix_col).cast(pl.Float64, strict=False) > 30.0).cast(pl.Float64).fill_null(0.0)
+        exprs.append(flag.alias("high_aix_flag"))
+        names.append("high_aix_flag")
+        flag_exprs.append(flag)
+    if flag_exprs:
+        exprs.append(pl.sum_horizontal(*flag_exprs).cast(pl.Float64).alias("cardio_burden_score"))
+        names.append("cardio_burden_score")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_renal_cardiometabolic_burden_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    plt_col = "plt_visit_mean" if "plt_visit_mean" in df.columns else ("plt_first_non_null" if "plt_first_non_null" in df.columns else None)
+    flag_exprs: list[pl.Expr] = []
+    if plt_col:
+        flag = (pl.col(plt_col).cast(pl.Float64, strict=False) < 150.0).cast(pl.Float64).fill_null(0.0)
+        exprs.append(flag.alias("low_plt_flag"))
+        names.append("low_plt_flag")
+        flag_exprs.append(flag)
+    if "Hypertension" in df.columns:
+        flag_exprs.append(pl.col("Hypertension").cast(pl.Float64, strict=False).fill_null(0.0))
+    if "T2DM" in df.columns:
+        flag_exprs.append(pl.col("T2DM").cast(pl.Float64, strict=False).fill_null(0.0))
+    if flag_exprs:
+        exprs.append(pl.sum_horizontal(*flag_exprs).cast(pl.Float64).alias("renal_cardio_burden_score"))
+        names.append("renal_cardio_burden_score")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_ratio_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    alt_c = _src("alt")
+    ast_c = _src("ast")
+    ggt_c = _src("ggt")
+    plt_c = _src("plt")
+    age_c = _src("Age")
+    if alt_c and ast_c:
+        exprs.append((pl.col(ast_c).cast(pl.Float64, strict=False) / pl.col(alt_c).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0)).alias("ast_alt_ratio"))
+        names.append("ast_alt_ratio")
+    if alt_c and ggt_c:
+        exprs.append((pl.col(ggt_c).cast(pl.Float64, strict=False) / pl.col(alt_c).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0)).alias("ggt_alt_ratio"))
+        names.append("ggt_alt_ratio")
+    if alt_c and plt_c and age_c and ast_c:
+        fib4_expr = (
+            pl.col(age_c).cast(pl.Float64, strict=False) *
+            pl.col(ast_c).cast(pl.Float64, strict=False)
+        ) / (
+            pl.col(plt_c).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0) *
+            pl.col(alt_c).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0).sqrt()
+        )
+        exprs.append(fib4_expr.alias("fib4_proxy"))
+        names.append("fib4_proxy")
+    chol_c = _src("chol")
+    trig_c = _src("triglyc")
+    if chol_c and trig_c:
+        exprs.append((pl.col(trig_c).cast(pl.Float64, strict=False) / pl.col(chol_c).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0)).alias("triglyc_chol_ratio"))
+        names.append("triglyc_chol_ratio")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_hemodynamic_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    aix_c = _src("aixp_aix_result_BM_3")
+    stiff_c = _src("fibs_stiffness_med_BM_1")
+    age_c = _src("Age")
+    bmi_c = _src("BMI")
+    if aix_c:
+        exprs.append(pl.col(aix_c).cast(pl.Float64, strict=False).alias("aix_mean"))
+        names.append("aix_mean")
+        if age_c:
+            adj_expr = (pl.col(aix_c).cast(pl.Float64, strict=False) - (pl.col(age_c).cast(pl.Float64, strict=False) - 25.0) * 0.33)
+            exprs.append(adj_expr.alias("aix_age_adjusted"))
+            names.append("aix_age_adjusted")
+    if stiff_c:
+        exprs.append(pl.col(stiff_c).cast(pl.Float64, strict=False).alias("liver_stiffness_mean"))
+        names.append("liver_stiffness_mean")
+        if bmi_c:
+            exprs.append((pl.col(stiff_c).cast(pl.Float64, strict=False) * pl.col(bmi_c).cast(pl.Float64, strict=False)).alias("stiffness_bmi_product"))
+            names.append("stiffness_bmi_product")
+    fibro_c = _src("fibrotest_BM_2")
+    if fibro_c:
+        exprs.append(pl.col(fibro_c).cast(pl.Float64, strict=False).alias("fibrotest_mean"))
+        names.append("fibrotest_mean")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_pairwise_interaction_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    key_pairs = [
+        ("fib4_proxy", "fibrotest_mean"),
+        ("metabolic_burden_score", "inflammatory_burden_score"),
+        ("comorbidity_count", "ast_alt_ratio"),
+        ("log1p_alt", "log1p_ast"),
+        ("BMI_visit_mean", "gluc_fast_visit_mean"),
+        ("liver_stiffness_mean", "fibrotest_mean"),
+    ]
+    fallback = {
+        "BMI_visit_mean": "BMI_first_non_null",
+        "gluc_fast_visit_mean": "gluc_fast_first_non_null",
+    }
+    for col_a, col_b in key_pairs:
+        ca = col_a if col_a in df.columns else fallback.get(col_a)
+        cb = col_b if col_b in df.columns else fallback.get(col_b)
+        if ca is None or cb is None or ca not in df.columns or cb not in df.columns:
+            continue
+        inter_name = f"inter_{ca[:20]}_{cb[:20]}"
+        exprs.append((pl.col(ca).cast(pl.Float64, strict=False) * pl.col(cb).cast(pl.Float64, strict=False)).alias(inter_name))
+        names.append(inter_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_higher_risk_interaction_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    burden_cols = [c for c in ["comorbidity_burden_score", "metabolic_burden_score", "inflammatory_burden_score", "cardio_burden_score"] if c in df.columns]
+    if len(burden_cols) >= 2:
+        total_burden = pl.sum_horizontal(*[pl.col(c).cast(pl.Float64, strict=False).fill_null(0.0) for c in burden_cols])
+        exprs.append(total_burden.alias("total_burden_score"))
+        names.append("total_burden_score")
+        exprs.append((total_burden > 3.0).cast(pl.Float64).alias("high_risk_gate"))
+        names.append("high_risk_gate")
+        if "fib4_proxy" in df.columns:
+            exprs.append((total_burden * pl.col("fib4_proxy").cast(pl.Float64, strict=False)).alias("burden_fib4_interaction"))
+            names.append("burden_fib4_interaction")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_threshold_flag_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    thresholds_list = [
+        ("alt", 3.0 * 40.0, "alt_3x_uln_flag"),
+        ("ast", 3.0 * 40.0, "ast_3x_uln_flag"),
+        ("ggt", 100.0, "ggt_high_flag"),
+        ("plt", 100.0, "plt_severe_low_flag"),
+        ("BMI", 35.0, "severe_obese_flag"),
+        ("gluc_fast", 11.0, "very_high_glucose_flag"),
+        ("fibs_stiffness_med_BM_1", 8.0, "stiffness_f2_flag"),
+        ("fibs_stiffness_med_BM_1", 13.0, "stiffness_f3_flag"),
+        ("fibrotest_BM_2", 0.48, "fibrotest_f2_flag"),
+    ]
+    for base, thresh, flag_name in thresholds_list:
+        c = _src(base)
+        if c is None:
+            continue
+        exprs.append((pl.col(c).cast(pl.Float64, strict=False) >= thresh).cast(pl.Float64).fill_null(0.0).alias(flag_name))
+        names.append(flag_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_quantile_bin_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    quant_bases = ["alt", "ast", "ggt", "BMI", "fib4_proxy", "total_burden_score"]
+    for base in quant_bases:
+        if base in df.columns:
+            c = base
+        else:
+            c = _src(base)
+        if c is None or c not in df.columns:
+            continue
+        series = df.get_column(c).cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        if len(series) < 5:
+            continue
+        quintiles = np.nanpercentile(series, [20, 40, 60, 80])
+        q1, q2, q3, q4 = float(quintiles[0]), float(quintiles[1]), float(quintiles[2]), float(quintiles[3])
+        bin_name = f"{c[:25]}_qbin5"
+        bin_expr = (
+            pl.when(pl.col(c).cast(pl.Float64, strict=False) <= q1).then(pl.lit(1.0))
+            .when(pl.col(c).cast(pl.Float64, strict=False) <= q2).then(pl.lit(2.0))
+            .when(pl.col(c).cast(pl.Float64, strict=False) <= q3).then(pl.lit(3.0))
+            .when(pl.col(c).cast(pl.Float64, strict=False) <= q4).then(pl.lit(4.0))
+            .otherwise(pl.lit(5.0))
+        )
+        exprs.append(bin_expr.alias(bin_name))
+        names.append(bin_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_group_relative_sex_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    if "gender" not in df.columns:
+        return df, []
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    biomarkers = ["alt", "ast", "ggt", "BMI", "plt"]
+    gender_col = pl.col("gender").cast(pl.Float64, strict=False)
+    for base in biomarkers:
+        c = _src(base)
+        if c is None:
+            continue
+        for g_val in [0.0, 1.0]:
+            mask = df.get_column("gender").cast(pl.Float64, strict=False) == g_val
+            vals = df.filter(mask).get_column(c).cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+            if len(vals) < 3:
+                continue
+            mu = float(np.mean(vals))
+            sigma = float(np.std(vals)) or 1.0
+            z_name = f"{c[:20]}_sex{int(g_val)}_zscore"
+            exprs.append(
+                pl.when(gender_col == g_val)
+                .then((pl.col(c).cast(pl.Float64, strict=False) - mu) / sigma)
+                .otherwise(pl.lit(None).cast(pl.Float64))
+                .alias(z_name)
+            )
+            names.append(z_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_group_relative_age_band_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    age_c = _src("Age")
+    if age_c is None:
+        return df, []
+    age_band = (df.get_column(age_c).cast(pl.Float64, strict=False) / 10.0).floor().cast(pl.Int32)
+    df_tmp = df.with_columns(age_band.alias("_age_band_tmp"))
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    biomarkers = ["alt", "BMI", "fib4_proxy"]
+    try:
+        for base in biomarkers:
+            c = _src(base) if base not in df.columns else base
+            if c is None or c not in df.columns:
+                continue
+            band_vals = df_tmp.group_by("_age_band_tmp").agg(
+                pl.col(c).cast(pl.Float64, strict=False).mean().alias("band_mean"),
+                pl.col(c).cast(pl.Float64, strict=False).std(ddof=1).alias("band_std"),
+            )
+            for row in band_vals.iter_rows(named=True):
+                band = row["_age_band_tmp"]
+                mu = row["band_mean"] or 0.0
+                sigma = row["band_std"] or 1.0
+                z_name = f"{c[:20]}_aband{band}_zscore"
+                exprs.append(
+                    pl.when(
+                        (pl.col(age_c).cast(pl.Float64, strict=False) / 10.0).floor().cast(pl.Int32) == band
+                    )
+                    .then((pl.col(c).cast(pl.Float64, strict=False) - mu) / (sigma if sigma > 0 else 1.0))
+                    .otherwise(pl.lit(None).cast(pl.Float64))
+                    .alias(z_name)
+                )
+                names.append(z_name)
+    finally:
+        df_tmp = df_tmp.drop("_age_band_tmp")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_percentile_rank_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+    rank_cols = [
+        c for c in ["fib4_proxy", "fibrotest_mean", "liver_stiffness_mean", "total_burden_score", "comorbidity_burden_score"]
+        if c in df.columns
+    ]
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    for base in ["alt", "ast", "BMI"]:
+        c = _src(base)
+        if c and c not in rank_cols:
+            rank_cols.append(c)
+    for c in rank_cols:
+        if c not in df.columns:
+            continue
+        rank_name = f"{c[:25]}_pctrank"
+        exprs.append(
+            pl.col(c).cast(pl.Float64, strict=False).rank(method="average").alias(rank_name) / float(df.height)
+        )
+        names.append(rank_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_robust_scaling_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    scale_bases = ["alt", "ast", "ggt", "BMI", "fib4_proxy"]
+    for base in scale_bases:
+        c = _src(base) if base not in df.columns else base
+        if c is None or c not in df.columns:
+            continue
+        series = df.get_column(c).cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        if len(series) < 5:
+            continue
+        med = float(np.median(series))
+        q25 = float(np.percentile(series, 25))
+        q75 = float(np.percentile(series, 75))
+        iqr = q75 - q25 or 1.0
+        rs_name = f"{c[:25]}_robust"
+        exprs.append(((pl.col(c).cast(pl.Float64, strict=False) - med) / iqr).alias(rs_name))
+        names.append(rs_name)
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_hepatic_event_specific_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    stiff_c = _src("fibs_stiffness_med_BM_1")
+    fibro_c = _src("fibrotest_BM_2")
+    if stiff_c and fibro_c:
+        exprs.append((pl.col(stiff_c).cast(pl.Float64, strict=False) * pl.col(fibro_c).cast(pl.Float64, strict=False)).alias("hepatic_stiffness_fibrotest"))
+        names.append("hepatic_stiffness_fibrotest")
+    stiff_delta = "fibs_stiffness_med_BM_1_delta_last_first"
+    if stiff_delta in df.columns:
+        exprs.append(pl.col(stiff_delta).cast(pl.Float64, strict=False).alias("hepatic_stiffness_delta"))
+        names.append("hepatic_stiffness_delta")
+        exprs.append((pl.col(stiff_delta).cast(pl.Float64, strict=False) > 0).cast(pl.Float64).alias("hepatic_stiffness_worsening"))
+        names.append("hepatic_stiffness_worsening")
+    if "fib4_proxy" in df.columns:
+        exprs.append((pl.col("fib4_proxy").cast(pl.Float64, strict=False) > 2.67).cast(pl.Float64).fill_null(0.0).alias("fib4_high_risk_flag"))
+        names.append("fib4_high_risk_flag")
+        exprs.append((pl.col("fib4_proxy").cast(pl.Float64, strict=False) > 1.3).cast(pl.Float64).fill_null(0.0).alias("fib4_intermediate_flag"))
+        names.append("fib4_intermediate_flag")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_death_specific_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    age_c = _src("Age")
+    aix_c = _src("aixp_aix_result_BM_3")
+    if age_c:
+        exprs.append(pl.col(age_c).cast(pl.Float64, strict=False).alias("death_age_feature"))
+        names.append("death_age_feature")
+        exprs.append((pl.col(age_c).cast(pl.Float64, strict=False) > 65.0).cast(pl.Float64).fill_null(0.0).alias("elderly_flag"))
+        names.append("elderly_flag")
+        exprs.append((pl.col(age_c).cast(pl.Float64, strict=False) > 75.0).cast(pl.Float64).fill_null(0.0).alias("very_elderly_flag"))
+        names.append("very_elderly_flag")
+    if age_c and "comorbidity_burden_score" in df.columns:
+        exprs.append((pl.col(age_c).cast(pl.Float64, strict=False) * pl.col("comorbidity_burden_score").cast(pl.Float64, strict=False)).alias("age_comorbidity_interaction"))
+        names.append("age_comorbidity_interaction")
+    if aix_c and age_c:
+        exprs.append((pl.col(aix_c).cast(pl.Float64, strict=False) + pl.col(age_c).cast(pl.Float64, strict=False) * 0.1).alias("death_cardio_age_score"))
+        names.append("death_cardio_age_score")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_categorical_encoding_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    if "gender" in df.columns:
+        bmi_c = _src("BMI")
+        if bmi_c:
+            exprs.append((pl.col("gender").cast(pl.Float64, strict=False) * pl.col(bmi_c).cast(pl.Float64, strict=False)).alias("gender_bmi_interact"))
+            names.append("gender_bmi_interact")
+        if "T2DM" in df.columns:
+            exprs.append((pl.col("gender").cast(pl.Float64, strict=False) * pl.col("T2DM").cast(pl.Float64, strict=False)).alias("gender_t2dm_interact"))
+            names.append("gender_t2dm_interact")
+        age_c = _src("Age")
+        if age_c:
+            exprs.append((pl.col("gender").cast(pl.Float64, strict=False) * pl.col(age_c).cast(pl.Float64, strict=False)).alias("gender_age_interact"))
+            names.append("gender_age_interact")
+    if "bariatric_surgery" in df.columns:
+        bmi_c = _src("BMI")
+        if bmi_c:
+            exprs.append((pl.col("bariatric_surgery").cast(pl.Float64, strict=False) * pl.col(bmi_c).cast(pl.Float64, strict=False)).alias("bariatric_bmi_interact"))
+            names.append("bariatric_bmi_interact")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_liver_fibrosis_composite_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    alt_c = _src("alt")
+    ast_c = _src("ast")
+    ggt_c = _src("ggt")
+    stiff_c = _src("fibs_stiffness_med_BM_1")
+    fibro_c = _src("fibrotest_BM_2")
+    if alt_c and ast_c and ggt_c:
+        liver_injury = (
+            pl.col(alt_c).cast(pl.Float64, strict=False).fill_null(0.0) / 40.0 +
+            pl.col(ast_c).cast(pl.Float64, strict=False).fill_null(0.0) / 40.0 +
+            pl.col(ggt_c).cast(pl.Float64, strict=False).fill_null(0.0) / 50.0
+        ) / 3.0
+        exprs.append(liver_injury.alias("liver_injury_composite"))
+        names.append("liver_injury_composite")
+    if stiff_c and fibro_c:
+        fibro_comp = (
+            pl.col(stiff_c).cast(pl.Float64, strict=False).fill_null(0.0) / 13.0 +
+            pl.col(fibro_c).cast(pl.Float64, strict=False).fill_null(0.0)
+        ) / 2.0
+        exprs.append(fibro_comp.alias("fibrosis_composite"))
+        names.append("fibrosis_composite")
+    if alt_c and stiff_c:
+        exprs.append((pl.col(alt_c).cast(pl.Float64, strict=False) * pl.col(stiff_c).cast(pl.Float64, strict=False)).alias("alt_stiffness_product"))
+        names.append("alt_stiffness_product")
+    plt_delta = "plt_delta_last_first"
+    if plt_delta in df.columns:
+        exprs.append((pl.col(plt_delta).cast(pl.Float64, strict=False) < -20.0).cast(pl.Float64).fill_null(0.0).alias("plt_declining_flag"))
+        names.append("plt_declining_flag")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_glucose_lipid_composite_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    gluc_c = _src("gluc_fast")
+    trig_c = _src("triglyc")
+    chol_c = _src("chol")
+    bmi_c = _src("BMI")
+    if gluc_c and trig_c:
+        tyg = (
+            pl.col(trig_c).cast(pl.Float64, strict=False).fill_null(1.0).clip(lower_bound=0.01) *
+            pl.col(gluc_c).cast(pl.Float64, strict=False).fill_null(1.0).clip(lower_bound=0.01) /
+            2.0
+        ).log(base=float(np.e))
+        exprs.append(tyg.alias("tyg_index"))
+        names.append("tyg_index")
+    if gluc_c and bmi_c:
+        homa_proxy = pl.col(gluc_c).cast(pl.Float64, strict=False) * pl.col(bmi_c).cast(pl.Float64, strict=False) / 22.5
+        exprs.append(homa_proxy.alias("homa_ir_proxy"))
+        names.append("homa_ir_proxy")
+    if chol_c and trig_c:
+        atherogenic = pl.col(trig_c).cast(pl.Float64, strict=False) / pl.col(chol_c).cast(pl.Float64, strict=False).fill_null(1.0).replace(0.0, 1.0)
+        exprs.append(atherogenic.alias("atherogenic_index"))
+        names.append("atherogenic_index")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_inflammation_obesity_interaction_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    bmi_c = _src("BMI")
+    alt_c = _src("alt")
+    ggt_c = _src("ggt")
+    trig_c = _src("triglyc")
+    if bmi_c and alt_c:
+        exprs.append((pl.col(bmi_c).cast(pl.Float64, strict=False) * pl.col(alt_c).cast(pl.Float64, strict=False)).alias("bmi_alt_product"))
+        names.append("bmi_alt_product")
+    if bmi_c and ggt_c:
+        exprs.append((pl.col(bmi_c).cast(pl.Float64, strict=False) * pl.col(ggt_c).cast(pl.Float64, strict=False)).alias("bmi_ggt_product"))
+        names.append("bmi_ggt_product")
+    if "obese_flag" in df.columns and "inflammatory_burden_score" in df.columns:
+        exprs.append((pl.col("obese_flag").cast(pl.Float64, strict=False) * pl.col("inflammatory_burden_score").cast(pl.Float64, strict=False)).alias("obese_inflam_gate"))
+        names.append("obese_inflam_gate")
+    if bmi_c and trig_c:
+        exprs.append((pl.col(bmi_c).cast(pl.Float64, strict=False) * pl.col(trig_c).cast(pl.Float64, strict=False)).alias("bmi_triglyc_product"))
+        names.append("bmi_triglyc_product")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_cardiac_stress_interaction_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    aix_c = _src("aixp_aix_result_BM_3")
+    age_c = _src("Age")
+    chol_c = _src("chol")
+    trig_c = _src("triglyc")
+    if aix_c and age_c:
+        exprs.append((pl.col(aix_c).cast(pl.Float64, strict=False) * pl.col(age_c).cast(pl.Float64, strict=False)).alias("aix_age_product"))
+        names.append("aix_age_product")
+    if "Hypertension" in df.columns and chol_c:
+        exprs.append((pl.col("Hypertension").cast(pl.Float64, strict=False) * pl.col(chol_c).cast(pl.Float64, strict=False)).alias("htn_chol_interact"))
+        names.append("htn_chol_interact")
+    if aix_c and trig_c:
+        exprs.append((pl.col(aix_c).cast(pl.Float64, strict=False) * pl.col(trig_c).cast(pl.Float64, strict=False)).alias("aix_triglyc_product"))
+        names.append("aix_triglyc_product")
+    if "cardio_burden_score" in df.columns and age_c:
+        exprs.append((pl.col("cardio_burden_score").cast(pl.Float64, strict=False) * pl.col(age_c).cast(pl.Float64, strict=False)).alias("cardio_age_product"))
+        names.append("cardio_age_product")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def add_renal_hepatic_interaction_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    exprs: list[pl.Expr] = []
+    names: list[str] = []
+
+    def _src(base: str) -> str | None:
+        mean = f"{base}_visit_mean"
+        first = f"{base}_first_non_null"
+        return mean if mean in df.columns else (first if first in df.columns else None)
+
+    plt_c = _src("plt")
+    stiff_c = _src("fibs_stiffness_med_BM_1")
+    bmi_c = _src("BMI")
+    if plt_c and stiff_c:
+        exprs.append((pl.col(stiff_c).cast(pl.Float64, strict=False) / pl.col(plt_c).cast(pl.Float64, strict=False).fill_null(150.0).replace(0.0, 150.0)).alias("stiffness_per_plt"))
+        names.append("stiffness_per_plt")
+    if "fib4_proxy" in df.columns and plt_c:
+        exprs.append((pl.col("fib4_proxy").cast(pl.Float64, strict=False) * (1.0 / pl.col(plt_c).cast(pl.Float64, strict=False).fill_null(150.0).replace(0.0, 150.0))).alias("fib4_per_plt"))
+        names.append("fib4_per_plt")
+    if bmi_c and stiff_c and plt_c:
+        exprs.append((pl.col(bmi_c).cast(pl.Float64, strict=False) * pl.col(stiff_c).cast(pl.Float64, strict=False) / pl.col(plt_c).cast(pl.Float64, strict=False).fill_null(150.0).replace(0.0, 150.0)).alias("bmi_stiff_per_plt"))
+        names.append("bmi_stiff_per_plt")
+    if not exprs:
+        return df, []
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    merged = df.join(feature_frame, on=ID_COLUMN, how="left")
+    return merged, names
+
+
+def build_cumulative_features(df: pl.DataFrame, up_to_exp: int) -> tuple[pl.DataFrame, list[str]]:
+    """Build cumulative feature set up to and including the given experiment number."""
+    enriched = df
+    feature_names: list[str] = []
+
+    enriched, names = add_visit_summary_features(enriched)
+    feature_names.extend(names)
+
+    if up_to_exp >= 3:
+        enriched, names = add_visit_minmax_mean_std_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 4:
+        enriched, names = add_visit_slope_trend_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 5:
+        enriched, names = add_visit_recency_persistence_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 6:
+        enriched, names = add_visit_missingness_trajectory_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 7:
+        enriched, names = add_missingness_flag_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 8:
+        enriched, names = add_log_winsorized_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 9:
+        enriched, names = add_clinical_burden_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 10:
+        enriched, names = add_metabolic_burden_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 11:
+        enriched, names = add_inflammatory_burden_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 12:
+        enriched, names = add_cardio_burden_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 13:
+        enriched, names = add_renal_cardiometabolic_burden_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 14:
+        enriched, names = add_ratio_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 15:
+        enriched, names = add_hemodynamic_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 16:
+        enriched, names = add_pairwise_interaction_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 17:
+        enriched, names = add_higher_risk_interaction_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 18:
+        enriched, names = add_threshold_flag_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 19:
+        enriched, names = add_quantile_bin_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 20:
+        enriched, names = add_group_relative_sex_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 21:
+        enriched, names = add_group_relative_age_band_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 22:
+        enriched, names = add_percentile_rank_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 23:
+        enriched, names = add_robust_scaling_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 24:
+        enriched, names = add_hepatic_event_specific_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 25:
+        enriched, names = add_death_specific_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 26:
+        enriched, names = add_categorical_encoding_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 27:
+        enriched, names = add_liver_fibrosis_composite_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 28:
+        enriched, names = add_glucose_lipid_composite_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 29:
+        enriched, names = add_inflammation_obesity_interaction_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 30:
+        enriched, names = add_cardiac_stress_interaction_features(enriched)
+        feature_names.extend(names)
+
+    if up_to_exp >= 31:
+        enriched, names = add_renal_hepatic_interaction_features(enriched)
+        feature_names.extend(names)
+
+    base_cols = baseline_feature_columns(df)
+    all_feature_cols = base_cols + feature_names
+    return enriched, all_feature_cols

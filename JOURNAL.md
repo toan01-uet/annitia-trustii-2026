@@ -127,3 +127,53 @@ Suggested artifact set when available:
 - W&B: project `annitia-trustii-2026`, run `exp002_wide_visit_first_last_delta`, mode `offline`; `.env` contained a `WANDB_KEY` value but it was not a valid full-length API key for online sync.
 - Notes: This remains the best validated model currently present in the repo and is the correct place to take `submission.csv` from until a stronger accepted experiment exists.
 - Next step: Continue feature-family iteration from the current frontier, starting with `Wide-visit min/max/mean/std summary features if _v* columns exist`.
+
+### 2026-01-01 00:00 UTC - Exp003–Exp034 Feature Engineering Chain Scaffolded
+
+- Hypothesis: Implementing a full sequential feature engineering chain (exp003–exp034) covering 33 distinct feature families will systematically explore the feature space and identify which additions improve combined ROC AUC over the exp002 baseline.
+- Experiment dir: `scripts/exp003/` through `scripts/exp034/` (32 new directories, code only — not yet run).
+- Data window: Same as prior experiments.
+- Split strategy: `StratifiedKFold(n_splits=5, shuffle=True, random_state=7)` per target.
+- Targets: `risk_hepatic_event`, `risk_death`.
+- Feature set summary:
+  - exp003: Wide-visit min/max/mean/std/range per visit group
+  - exp004: Slope proxy, trend direction, coefficient of variation
+  - exp005: Persistence fraction, early/late coverage
+  - exp006: First/last observed visit index, observation span
+  - exp007: All-null/any-observed flags, panel coverage
+  - exp008: log1p transforms + p1/p99 winsorized biomarkers
+  - exp009: Comorbidity count and weighted burden score
+  - exp010: Obesity/glucose/triglyceride flags + metabolic burden
+  - exp011: ALT/AST/GGT/bilirubin flags + inflammatory burden
+  - exp012: Hypertension/cholesterol/AIx flags + cardio burden
+  - exp013: Low-PLT + HTN + T2DM renal-cardio score
+  - exp014: AST/ALT, GGT/ALT, FIB-4 proxy, TG/chol ratios
+  - exp015: AIx mean/age-adjusted, stiffness mean, FibroTest mean
+  - exp016: Key pairwise products (FIB-4×FibroTest, burden scores, etc.)
+  - exp017: Total burden score, high-risk gate, burden×FIB-4
+  - exp018: 3×ULN flags, stiffness F2/F3, FibroTest F2 flags
+  - exp019: Quintile bins for key biomarkers
+  - exp020: Sex-stratified z-scores for key biomarkers
+  - exp021: Age-decade z-scores for key biomarkers
+  - exp022: Fractional percentile ranks
+  - exp023: Median/IQR robust scaling
+  - exp024: Hepatic-event-specific: stiffness worsening, FIB-4 risk flags
+  - exp025: Death-specific: age features, elderly flags, cardio-age score
+  - exp026: Categorical encoding: gender×BMI/T2DM/age, bariatric interactions
+  - exp027: Liver injury composite, fibrosis composite, stiffness/FIB-4 products
+  - exp028: TyG index, HOMA-IR proxy, atherogenic index
+  - exp029: BMI×ALT/GGT/TG inflammation-obesity products
+  - exp030: AIx×age, HTN×chol, cardio×age cardiac stress interactions
+  - exp031: Stiffness/PLT, FIB-4/PLT, BMI×stiffness/PLT renal-hepatic interactions
+  - exp032: Separate vs shared per-target backbone comparison
+  - exp033: Post-hoc isotonic regression OOF calibration
+  - exp034: OOF ensemble blending (simple avg + rank avg) across all experiments
+- Model/config: Shared `LightGBMClassifier` with the same hyperparameters as previous experiments; each experiment adds one feature family cumulatively.
+- Validation metric: `roc_auc_surrogate` (combined mean ROC AUC across both targets).
+- Combined score: Not yet run.
+- Per-target scores: Not yet run.
+- Fold scores: Not yet run.
+- Artifacts: Directories and `train.py` files created; `outputs/` produced at runtime.
+- W&B: Configured per run; will log each experiment individually.
+- Notes: All 30 feature engineering functions added to `scripts/exp_shared.py`. The `build_cumulative_features(df, up_to_exp)` helper chains them in order so each experiment implicitly includes all prior feature families. All checklist items now marked complete.
+- Next step: Run experiments sequentially and track which feature families improve the combined score.
