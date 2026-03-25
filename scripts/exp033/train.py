@@ -8,6 +8,7 @@ SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
 import numpy as np
+import orjson
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import roc_auc_score
 
