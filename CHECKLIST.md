@@ -1,0 +1,37 @@
+- [x] Schema audit and raw-to-semantic column map
+- [x] Baseline raw-feature model for `risk_hepatic_event`
+- [x] Baseline raw-feature model for `risk_death`
+- [x] Shared-feature dual-target baseline
+- [ ] Missingness flags and panel coverage features
+- [ ] Log-transform and winsorized biomarker features
+- [ ] Clinical burden and comorbidity count features
+- [ ] Metabolic burden features
+- [ ] Inflammatory burden features
+- [ ] Cardio burden features
+- [ ] Renal-cardiometabolic burden features
+- [ ] Ratio features
+- [ ] Hemodynamic features
+- [ ] Pairwise interaction features
+- [ ] Higher-risk interaction gates and capped interactions
+- [ ] Threshold and binary clinical flag features
+- [ ] Quantile-bin and ordinal risk-zone features
+- [ ] Group-relative normalization by sex
+- [ ] Group-relative normalization by age band
+- [ ] Percentile and rank-based transforms
+- [ ] Robust scaling and outlier clipping variants
+- [ ] Endpoint-specific hepatic-event feature block
+- [ ] Endpoint-specific death feature block
+- [ ] Categorical encoding strategy sweep
+- [x] Wide-visit first/last/delta summary features if `_v*` columns exist
+- [ ] Wide-visit min/max/mean/std summary features if `_v*` columns exist
+- [ ] Wide-visit slope and trend proxy features if `_v*` columns exist
+- [ ] Wide-visit recency and persistence features if `_v*` columns exist
+- [ ] Visit-level missingness trajectory features if `_v*` columns exist
+- [ ] Liver injury and fibrosis composite features
+- [ ] Glucose-lipid-metabolic syndrome composite features
+- [ ] Inflammation-obesity interaction family
+- [ ] Cardiac stress interaction family
+- [ ] Renal-hepatic interaction family
+- [ ] Separate-model versus shared-backbone comparison
+- [ ] Target transform and calibration search
+- [ ] Rank-oriented blending and ensemble search

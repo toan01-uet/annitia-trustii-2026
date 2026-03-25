@@ -1,0 +1,19 @@
+{
+  "api_key_present": true,
+  "api_key_valid": false,
+  "artifact_paths": [
+    "scripts/exp002/outputs/added_feature_names.txt",
+    "scripts/exp002/outputs/feature_columns.txt",
+    "scripts/exp002/outputs/feature_family_summary.json",
+    "scripts/exp002/outputs/validation_summary.json",
+    "scripts/exp002/outputs/metrics.json",
+    "scripts/exp002/outputs/fold_scores.csv",
+    "scripts/exp002/outputs/oof_predictions.csv",
+    "scripts/exp002/outputs/feature_importance.csv",
+    "scripts/exp002/outputs/submission/test_predictions.csv",
+    "scripts/exp002/outputs/submission/submission.csv"
+  ],
+  "mode": "offline",
+  "project": "annitia-trustii-2026",
+  "run_name": "exp002_wide_visit_first_last_delta"
+}

@@ -1,0 +1,14 @@
+numpy
+polars
+duckdb
+pyarrow
+scikit-learn
+lightgbm
+xgboost
+catboost
+matplotlib
+seaborn
+jupyter
+orjson
+joblib
+wandb

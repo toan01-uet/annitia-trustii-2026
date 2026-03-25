@@ -1,0 +1,120 @@
+Trước hết hãy dùng môi trường `.venv` của repo:
+
+`source .venv/bin/activate`
+
+Sau đó đọc đầy đủ các file điều luật và context của repo:
+
+- `AGENTS.md`
+- `checklist-prompt.md` (nếu có)
+- `JOURNAL.md`
+- `README.md`
+- `CHECKLIST.md`
+
+Lưu ý quan trọng trước khi bắt đầu:
+
+1. Repo ANNITIA hiện tại không còn dùng rule March Madness kiểu `walk-forward 2021-2025` hay `improve >=4/5 folds`.
+2. Validation rule hiện tại là patient-level cross-validation, mặc định ưu tiên 5 folds.
+3. Metric ưu tiên là metric chính thức của challenge nếu xác nhận được. Nếu chưa xác nhận được thì phải ghi rõ surrogate metric đang dùng.
+4. Mỗi experiment phải nằm trong `scripts/expXXX/`.
+5. Output của mỗi experiment phải nằm trong `scripts/expXXX/outputs/`.
+6. Sau mỗi experiment phải log output, metrics, scores, config, decision vào `wandb`.
+7. Không generate submission nếu chưa được yêu cầu.
+8. Không được dừng chỉ để báo cáo trạng thái. Checklist chưa xong thì tiếp tục, trừ khi có blocker thật.
+
+Hãy giao nhiệm vụ cho Codex theo đúng 1 vòng lặp cụ thể sau đây:
+
+## Nhiệm vụ vòng lặp hiện tại
+
+### Mục tiêu
+
+Thực hiện đúng 1 vòng lặp nghiên cứu hoàn chỉnh cho family:
+
+`Wide-visit first/last/delta summary features if _v* columns exist`
+
+### Trình tự bắt buộc
+
+1. Kiểm tra `CHECKLIST.md`.
+2. Nếu mục `Schema audit and raw-to-semantic column map` chưa hoàn thành, hoàn thành mục này trước trong cùng vòng lặp:
+   - inspect raw schema
+   - inspect dictionary
+   - map raw columns sang semantic concepts
+   - xác nhận target columns dùng cho modeling
+   - ghi ngắn gọn kết quả vào `JOURNAL.md`
+3. Tạo experiment directory mới theo format:
+   - `scripts/expXXX/`
+   - `scripts/expXXX/outputs/`
+4. Kiểm tra `JOURNAL.md` để xem đã có baseline hợp lệ chưa.
+5. Nếu chưa có baseline hợp lệ, trong chính vòng lặp này phải chạy baseline trước:
+   - baseline raw-feature model cho `risk_hepatic_event`
+   - baseline raw-feature model cho `risk_death`
+   - hoặc shared-feature dual-target baseline nếu phù hợp hơn
+   - lưu output baseline vào `scripts/expXXX/outputs/`
+   - log baseline run vào `wandb`
+6. Trên nền baseline gần nhất, tạo candidate cho đúng family:
+   - thêm ít nhất 10 features mới thuộc family `Wide-visit first/last/delta summary features`
+   - ưu tiên Polars `LazyFrame`
+   - chỉ dùng summary leakage-safe từ các cột `_v*`
+   - ví dụ kiểu feature hợp lệ: first, last, delta, visit count, first-non-null, last-non-null, delta-normalized, panel-specific delta
+7. Chạy full validation theo rule hiện tại của repo:
+   - patient-level CV
+   - mặc định 5 folds nếu khả thi
+   - metric official nếu đã xác nhận, nếu chưa thì ghi rõ surrogate metric
+8. Ghi đầy đủ output vào `scripts/expXXX/outputs/`, tối thiểu gồm:
+   - `validation_summary.json`
+   - `metrics.json`
+   - file tóm tắt feature list
+   - nếu có, feature importance hoặc OOF summary
+9. Log completed experiment vào `wandb`:
+   - experiment name
+   - experiment directory
+   - feature family
+   - model/config summary
+   - split strategy
+   - metric name
+   - combined score
+   - per-target scores
+   - fold-level scores
+   - baseline comparison
+   - accept/reject decision
+   - paths tới files trong `scripts/expXXX/outputs/`
+10. So sánh candidate với baseline gần nhất và quyết định:
+   - nếu tốt hơn theo rule validation hiện tại của repo thì accept
+   - nếu không thì reject
+   - không tự bịa rule `>=4/5 folds` nếu repo hiện tại không định nghĩa rule đó
+11. Append kết quả vào `JOURNAL.md` với đầy đủ:
+   - hypothesis
+   - experiment dir
+   - split strategy
+   - targets
+   - feature set
+   - model/config
+   - validation metric
+   - combined score
+   - per-target scores
+   - fold scores
+   - artifacts
+   - W&B run reference
+   - next step
+12. Update `CHECKLIST.md`:
+   - tick mục schema audit nếu đã hoàn thành
+   - tick mục baseline nếu baseline đã được thiết lập xong
+   - tick family `Wide-visit first/last/delta summary features if _v* columns exist` sau khi family đã được xử lý xong trong vòng lặp này
+13. Chuẩn bị kế hoạch cho vòng tiếp theo:
+   - đề xuất đúng 1 family kế tiếp
+   - không generate submission
+   - không dừng chỉ để status update
+
+### Điều kiện hoàn thành vòng lặp
+
+Vòng lặp này chỉ được xem là hoàn tất khi đồng thời thỏa cả các điều kiện sau:
+
+- experiment code nằm trong `scripts/expXXX/`
+- output nằm trong `scripts/expXXX/outputs/`
+- validation đã chạy xong
+- `wandb` đã được log
+- `JOURNAL.md` đã append
+- `CHECKLIST.md` đã update
+- đã có quyết định accept/reject rõ ràng
+- đã ghi next step cho vòng tiếp theo
+
+Nếu thiếu bất kỳ mục nào ở trên thì chưa được coi là kết thúc vòng lặp.

@@ -1,0 +1,131 @@
+{
+  "accepted": true,
+  "added_feature_count": 65,
+  "baseline_comparison": {
+    "absolute_improvement": 0.014545375269891525,
+    "accepted": true,
+    "baseline_combined_score": 0.7963988690923062,
+    "candidate_combined_score": 0.8109442443621977
+  },
+  "combined_average_precision": 0.25995238137148424,
+  "combined_score": 0.8109442443621977,
+  "decision_reason": "Accepted because combined surrogate ROC AUC improved over baseline.",
+  "experiment_dir": "scripts/exp002",
+  "experiment_name": "exp002_wide_visit_first_last_delta",
+  "feature_count": 347,
+  "generated_at_utc": "2026-03-23T08:06:50.707692+00:00",
+  "lightgbm_params": {
+    "colsample_bytree": 0.9,
+    "learning_rate": 0.03,
+    "min_child_samples": 20,
+    "n_estimators": 300,
+    "n_jobs": 4,
+    "num_leaves": 31,
+    "objective": "binary",
+    "random_state": 7,
+    "reg_lambda": 1.0,
+    "subsample": 0.9,
+    "subsample_freq": 1,
+    "verbosity": -1
+  },
+  "metric_note": "Official challenge metric not confirmed from accessible local materials; using ROC AUC as a ranking-oriented surrogate.",
+  "official_metric_confirmed": false,
+  "primary_validation_metric": "roc_auc_surrogate",
+  "split_strategy": "StratifiedKFold(n_splits=5, shuffle=True, random_state=7)",
+  "targets": {
+    "risk_death": {
+      "folds": [
+        {
+          "average_precision": 0.34580868343971355,
+          "fold": 1,
+          "positive_count": 15,
+          "roc_auc": 0.7406593406593407,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.29554432574947587,
+          "fold": 2,
+          "positive_count": 15,
+          "roc_auc": 0.7754578754578755,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.27804845472915646,
+          "fold": 3,
+          "positive_count": 15,
+          "roc_auc": 0.7728937728937728,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.41054415282759554,
+          "fold": 4,
+          "positive_count": 16,
+          "roc_auc": 0.7796961325966851,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.4868853726918243,
+          "fold": 5,
+          "positive_count": 15,
+          "roc_auc": 0.8736648250460405,
+          "row_count": 196
+        }
+      ],
+      "mean_average_precision": 0.3302907992872635,
+      "mean_roc_auc": 0.7871261303037328,
+      "null_excluded_count": 269,
+      "positive_count": 76,
+      "raw_target_column": "death",
+      "row_count": 984,
+      "semantic_target": "risk_death"
+    },
+    "risk_hepatic_event": {
+      "folds": [
+        {
+          "average_precision": 0.24058660703231452,
+          "fold": 1,
+          "positive_count": 9,
+          "roc_auc": 0.8489439853076217,
+          "row_count": 251
+        },
+        {
+          "average_precision": 0.23550822604281238,
+          "fold": 2,
+          "positive_count": 10,
+          "roc_auc": 0.7767634854771784,
+          "row_count": 251
+        },
+        {
+          "average_precision": 0.29122603677573705,
+          "fold": 3,
+          "positive_count": 10,
+          "roc_auc": 0.8701244813278008,
+          "row_count": 251
+        },
+        {
+          "average_precision": 0.12991620610311264,
+          "fold": 4,
+          "positive_count": 9,
+          "roc_auc": 0.8538497003227294,
+          "row_count": 250
+        },
+        {
+          "average_precision": 0.29842549991054507,
+          "fold": 5,
+          "positive_count": 9,
+          "roc_auc": 0.8381742738589212,
+          "row_count": 250
+        }
+      ],
+      "mean_average_precision": 0.18961396345570503,
+      "mean_roc_auc": 0.8347623584206626,
+      "null_excluded_count": 0,
+      "positive_count": 47,
+      "raw_target_column": "evenements_hepatiques_majeurs",
+      "row_count": 1253,
+      "semantic_target": "risk_hepatic_event"
+    }
+  },
+  "wandb_api_key_present": true,
+  "wandb_mode": "offline"
+}

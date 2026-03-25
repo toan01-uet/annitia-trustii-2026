@@ -1,0 +1,12 @@
+/data/
+/artifacts/
+.DS_Store
+__pycache__/
+*.pyc
+.env
+.venv/
+*/outputs/
+**/outputs/
+# Ignore experiment output folders
+scripts/**/outputs/
+outputs/

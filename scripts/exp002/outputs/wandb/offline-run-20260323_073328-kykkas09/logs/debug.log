@@ -1,0 +1,23 @@
+2026-03-23 07:33:28,626 INFO    MainThread:606096 [wandb_setup.py:_flush():81] Current SDK version is 0.25.1
+2026-03-23 07:33:28,626 INFO    MainThread:606096 [wandb_setup.py:_flush():81] Configure stats pid to 606096
+2026-03-23 07:33:28,626 INFO    MainThread:606096 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-03-23 07:33:28,627 INFO    MainThread:606096 [wandb_init.py:setup_run_log_directory():717] Logging user logs to /home/azureuser/toanvt7/test_data/test_contest/annitia-trustii-2026/scripts/exp002/outputs/wandb/offline-run-20260323_073328-kykkas09/logs/debug.log
+2026-03-23 07:33:28,627 INFO    MainThread:606096 [wandb_init.py:setup_run_log_directory():718] Logging internal logs to /home/azureuser/toanvt7/test_data/test_contest/annitia-trustii-2026/scripts/exp002/outputs/wandb/offline-run-20260323_073328-kykkas09/logs/debug-internal.log
+2026-03-23 07:33:28,627 INFO    MainThread:606096 [wandb_init.py:init():844] calling init triggers
+2026-03-23 07:33:28,627 INFO    MainThread:606096 [wandb_init.py:init():849] wandb.init called with sweep_config: {}
+config: {'experiment_name': 'exp002_wide_visit_first_last_delta', 'experiment_dir': 'scripts/exp002', 'feature_family': 'wide_visit_first_last_delta', 'target_setup': ['risk_hepatic_event', 'risk_death'], 'feature_count': 347, 'added_feature_count': 65, 'baseline_combined_score': 0.7963988690923062, 'accepted': True, '_wandb': {}}
+2026-03-23 07:33:28,627 INFO    MainThread:606096 [wandb_init.py:init():892] starting backend
+2026-03-23 07:33:28,889 INFO    MainThread:606096 [wandb_init.py:init():895] sending inform_init request
+2026-03-23 07:33:28,892 INFO    MainThread:606096 [wandb_init.py:init():903] backend started and connected
+2026-03-23 07:33:28,894 INFO    MainThread:606096 [wandb_init.py:init():973] updated telemetry
+2026-03-23 07:33:28,895 INFO    MainThread:606096 [wandb_init.py:init():997] communicating run to backend with 90.0 second timeout
+2026-03-23 07:33:29,001 INFO    MainThread:606096 [wandb_init.py:init():1042] starting run threads in backend
+2026-03-23 07:33:29,331 INFO    MainThread:606096 [wandb_run.py:_console_start():2524] atexit reg
+2026-03-23 07:33:29,331 INFO    MainThread:606096 [wandb_run.py:_redirect():2373] redirect: wrap_raw
+2026-03-23 07:33:29,331 INFO    MainThread:606096 [wandb_run.py:_redirect():2442] Wrapping output streams.
+2026-03-23 07:33:29,331 INFO    MainThread:606096 [wandb_run.py:_redirect():2465] Redirects installed.
+2026-03-23 07:33:29,332 INFO    MainThread:606096 [wandb_init.py:init():1082] run started, returning control to user process
+2026-03-23 07:33:29,338 INFO    MainThread:606096 [wandb_run.py:_finish():2291] finishing run annitia-trustii-2026/kykkas09
+2026-03-23 07:33:29,339 INFO    MainThread:606096 [wandb_run.py:_atexit_cleanup():2490] got exitcode: 0
+2026-03-23 07:33:29,339 INFO    MainThread:606096 [wandb_run.py:_restore():2472] restore
+2026-03-23 07:33:29,339 INFO    MainThread:606096 [wandb_run.py:_restore():2478] restore done

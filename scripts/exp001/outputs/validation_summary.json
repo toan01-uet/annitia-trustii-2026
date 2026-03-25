@@ -1,0 +1,124 @@
+{
+  "accepted": true,
+  "combined_average_precision": 0.22390183375245393,
+  "combined_score": 0.7963988690923062,
+  "decision_reason": "First runnable baseline for the reset ANNITIA workspace.",
+  "experiment_dir": "scripts/exp001",
+  "experiment_name": "exp001_baseline_raw_features",
+  "feature_count": 282,
+  "generated_at_utc": "2026-03-23T08:06:29.055522+00:00",
+  "lightgbm_params": {
+    "colsample_bytree": 0.9,
+    "learning_rate": 0.03,
+    "min_child_samples": 20,
+    "n_estimators": 300,
+    "n_jobs": 4,
+    "num_leaves": 31,
+    "objective": "binary",
+    "random_state": 7,
+    "reg_lambda": 1.0,
+    "subsample": 0.9,
+    "subsample_freq": 1,
+    "verbosity": -1
+  },
+  "metric_note": "Official challenge metric not confirmed from accessible local materials; using ROC AUC as a ranking-oriented surrogate.",
+  "official_metric_confirmed": false,
+  "primary_validation_metric": "roc_auc_surrogate",
+  "split_strategy": "StratifiedKFold(n_splits=5, shuffle=True, random_state=7)",
+  "targets": {
+    "risk_death": {
+      "folds": [
+        {
+          "average_precision": 0.3297022107550083,
+          "fold": 1,
+          "positive_count": 15,
+          "roc_auc": 0.7531135531135531,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.28505594643638327,
+          "fold": 2,
+          "positive_count": 15,
+          "roc_auc": 0.7644688644688645,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.23661771287295488,
+          "fold": 3,
+          "positive_count": 15,
+          "roc_auc": 0.7666666666666666,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.4244653407971,
+          "fold": 4,
+          "positive_count": 16,
+          "roc_auc": 0.8062845303867403,
+          "row_count": 197
+        },
+        {
+          "average_precision": 0.43770973338992525,
+          "fold": 5,
+          "positive_count": 15,
+          "roc_auc": 0.8419889502762431,
+          "row_count": 196
+        }
+      ],
+      "mean_average_precision": 0.3053620246966082,
+      "mean_roc_auc": 0.7850104335729191,
+      "null_excluded_count": 269,
+      "positive_count": 76,
+      "raw_target_column": "death",
+      "row_count": 984,
+      "semantic_target": "risk_death"
+    },
+    "risk_hepatic_event": {
+      "folds": [
+        {
+          "average_precision": 0.22426004330766233,
+          "fold": 1,
+          "positive_count": 9,
+          "roc_auc": 0.842516069788797,
+          "row_count": 251
+        },
+        {
+          "average_precision": 0.14128611371313482,
+          "fold": 2,
+          "positive_count": 10,
+          "roc_auc": 0.7829875518672199,
+          "row_count": 251
+        },
+        {
+          "average_precision": 0.15346125700746163,
+          "fold": 3,
+          "positive_count": 10,
+          "roc_auc": 0.8680497925311202,
+          "row_count": 251
+        },
+        {
+          "average_precision": 0.1203302013834939,
+          "fold": 4,
+          "positive_count": 9,
+          "roc_auc": 0.7404333794375288,
+          "row_count": 250
+        },
+        {
+          "average_precision": 0.34231421363434716,
+          "fold": 5,
+          "positive_count": 9,
+          "roc_auc": 0.8128169663439373,
+          "row_count": 250
+        }
+      ],
+      "mean_average_precision": 0.1424416428082996,
+      "mean_roc_auc": 0.8077873046116932,
+      "null_excluded_count": 0,
+      "positive_count": 47,
+      "raw_target_column": "evenements_hepatiques_majeurs",
+      "row_count": 1253,
+      "semantic_target": "risk_hepatic_event"
+    }
+  },
+  "wandb_api_key_present": true,
+  "wandb_mode": "offline"
+}

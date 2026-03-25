@@ -1,0 +1,19 @@
+{
+  "api_key_present": true,
+  "api_key_valid": false,
+  "artifact_paths": [
+    "scripts/exp001/outputs/schema_audit.json",
+    "scripts/exp001/outputs/raw_to_semantic_map.json",
+    "scripts/exp001/outputs/feature_columns.txt",
+    "scripts/exp001/outputs/validation_summary.json",
+    "scripts/exp001/outputs/metrics.json",
+    "scripts/exp001/outputs/fold_scores.csv",
+    "scripts/exp001/outputs/oof_predictions.csv",
+    "scripts/exp001/outputs/feature_importance.csv",
+    "scripts/exp001/outputs/submission/test_predictions.csv",
+    "scripts/exp001/outputs/submission/submission.csv"
+  ],
+  "mode": "offline",
+  "project": "annitia-trustii-2026",
+  "run_name": "exp001_baseline_raw_features"
+}

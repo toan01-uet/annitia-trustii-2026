@@ -1,0 +1,8 @@
+{
+  "combined_average_precision": 0.22390183375245393,
+  "combined_score": 0.7963988690923062,
+  "risk_death_mean_average_precision": 0.3053620246966082,
+  "risk_death_mean_roc_auc": 0.7850104335729191,
+  "risk_hepatic_event_mean_average_precision": 0.1424416428082996,
+  "risk_hepatic_event_mean_roc_auc": 0.8077873046116932
+}
