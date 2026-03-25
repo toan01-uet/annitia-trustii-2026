@@ -1076,28 +1076,31 @@ def add_group_relative_age_band_features(df: pl.DataFrame) -> tuple[pl.DataFrame
     exprs: list[pl.Expr] = []
     names: list[str] = []
     biomarkers = ["alt", "BMI", "fib4_proxy"]
-    for base in biomarkers:
-        c = _src(base) if base not in df.columns else base
-        if c is None or c not in df.columns:
-            continue
-        band_vals = df_tmp.group_by("_age_band_tmp").agg(
-            pl.col(c).cast(pl.Float64, strict=False).mean().alias("band_mean"),
-            pl.col(c).cast(pl.Float64, strict=False).std(ddof=1).alias("band_std"),
-        )
-        for row in band_vals.iter_rows(named=True):
-            band = row["_age_band_tmp"]
-            mu = row["band_mean"] or 0.0
-            sigma = row["band_std"] or 1.0
-            z_name = f"{c[:20]}_aband{band}_zscore"
-            exprs.append(
-                pl.when(
-                    (pl.col(age_c).cast(pl.Float64, strict=False) / 10.0).floor().cast(pl.Int32) == band
-                )
-                .then((pl.col(c).cast(pl.Float64, strict=False) - mu) / (sigma if sigma > 0 else 1.0))
-                .otherwise(pl.lit(None).cast(pl.Float64))
-                .alias(z_name)
+    try:
+        for base in biomarkers:
+            c = _src(base) if base not in df.columns else base
+            if c is None or c not in df.columns:
+                continue
+            band_vals = df_tmp.group_by("_age_band_tmp").agg(
+                pl.col(c).cast(pl.Float64, strict=False).mean().alias("band_mean"),
+                pl.col(c).cast(pl.Float64, strict=False).std(ddof=1).alias("band_std"),
             )
-            names.append(z_name)
+            for row in band_vals.iter_rows(named=True):
+                band = row["_age_band_tmp"]
+                mu = row["band_mean"] or 0.0
+                sigma = row["band_std"] or 1.0
+                z_name = f"{c[:20]}_aband{band}_zscore"
+                exprs.append(
+                    pl.when(
+                        (pl.col(age_c).cast(pl.Float64, strict=False) / 10.0).floor().cast(pl.Int32) == band
+                    )
+                    .then((pl.col(c).cast(pl.Float64, strict=False) - mu) / (sigma if sigma > 0 else 1.0))
+                    .otherwise(pl.lit(None).cast(pl.Float64))
+                    .alias(z_name)
+                )
+                names.append(z_name)
+    finally:
+        df_tmp = df_tmp.drop("_age_band_tmp")
     if not exprs:
         return df, []
     feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
@@ -1325,7 +1328,7 @@ def add_glucose_lipid_composite_features(df: pl.DataFrame) -> tuple[pl.DataFrame
             pl.col(trig_c).cast(pl.Float64, strict=False).fill_null(1.0).clip(lower_bound=0.01) *
             pl.col(gluc_c).cast(pl.Float64, strict=False).fill_null(1.0).clip(lower_bound=0.01) /
             2.0
-        ).log(base=2.718281828)
+        ).log(base=float(np.e))
         exprs.append(tyg.alias("tyg_index"))
         names.append("tyg_index")
     if gluc_c and bmi_c:

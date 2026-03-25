@@ -150,8 +150,8 @@ def main() -> None:
         sum(v["best_blend_roc_auc"] for v in blend_results.values()) / len(blend_results)
     )
 
-    (OUTPUT_DIR / "blend_results.json").write_text(
-        __import__("json").dumps(blend_results, indent=2)
+    (OUTPUT_DIR / "blend_results.json").write_bytes(
+        orjson.dumps(blend_results, option=orjson.OPT_INDENT_2)
     )
 
     # For submission, re-run the best single experiment's feature set on test data using
