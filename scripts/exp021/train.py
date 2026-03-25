@@ -8,6 +8,7 @@ SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
 import exp_shared as shared
+import orjson
 
 EXPERIMENT_NAME = "exp021_group_relative_age_band"
 EXPERIMENT_DIR = PROJECT_ROOT / "scripts" / "exp021"
@@ -154,6 +155,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import orjson
 
     main()

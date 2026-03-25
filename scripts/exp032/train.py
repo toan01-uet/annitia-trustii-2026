@@ -8,6 +8,7 @@ SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
 import exp_shared as shared
+import orjson
 
 EXPERIMENT_NAME = "exp032_separate_vs_shared_backbone"
 EXPERIMENT_DIR = PROJECT_ROOT / "scripts" / "exp032"
@@ -209,6 +210,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import orjson
 
     main()
