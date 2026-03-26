@@ -10,3 +10,7 @@ __pycache__/
 # Ignore experiment output folders
 scripts/**/outputs/
 outputs/
+
+*.csv
+*.parquet
+*.png
