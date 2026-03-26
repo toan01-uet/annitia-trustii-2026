@@ -10,7 +10,6 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 import numpy as np
 import orjson
 import polars as pl
-from sklearn.metrics import roc_auc_score
 
 import exp_shared as shared
 
@@ -43,6 +42,23 @@ def _load_oof_scores(exp_name: str, target: str) -> np.ndarray | None:
         return None
 
 
+def _load_test_scores(exp_name: str, target: str) -> np.ndarray | None:
+    test_path = PROJECT_ROOT / "scripts" / exp_name / "outputs" / "submission" / "test_predictions.csv"
+    if not test_path.exists():
+        return None
+    try:
+        test_df = pl.read_csv(test_path)
+        score_col = f"{target}_prediction"
+        if score_col not in test_df.columns:
+            return None
+        scores = test_df.get_column(score_col).to_numpy().astype(float)
+        if np.all(np.isnan(scores)):
+            return None
+        return scores
+    except Exception:
+        return None
+
+
 def _blend_simple_average(score_matrix: np.ndarray) -> np.ndarray:
     """Column-wise mean ignoring NaN."""
     return np.nanmean(score_matrix, axis=1)
@@ -65,11 +81,16 @@ def _blend_rank_average(score_matrix: np.ndarray) -> np.ndarray:
     return np.nanmean(rank_matrix, axis=1)
 
 
-def _evaluate_blend(blended_scores: np.ndarray, labels: np.ndarray) -> float:
-    valid = ~np.isnan(labels) & ~np.isnan(blended_scores)
-    if valid.sum() == 0 or len(np.unique(labels[valid])) < 2:
+def _evaluate_blend(blended_scores: np.ndarray, event_indicator: np.ndarray, event_times: np.ndarray) -> float:
+    valid = ~np.isnan(blended_scores) & ~np.isnan(event_times)
+    if valid.sum() == 0 or event_indicator[valid].sum() == 0:
         return 0.5
-    return float(roc_auc_score(labels[valid], blended_scores[valid]))
+    score, *_ = shared.concordance_index_censored(
+        event_indicator[valid],
+        event_times[valid],
+        blended_scores[valid],
+    )
+    return float(score)
 
 
 def main() -> None:
@@ -84,70 +105,81 @@ def main() -> None:
     raw_df = shared.load_raw_data()
     test_df = shared.load_test_data()
 
-    # Load labels from raw_df
-    label_arrays: dict[str, np.ndarray] = {}
+    eval_inputs: dict[str, dict[str, np.ndarray]] = {}
     for semantic_target, target_col in shared.TARGET_COLUMN_MAP.items():
-        if target_col in raw_df.columns:
-            label_arrays[semantic_target] = raw_df.get_column(target_col).to_numpy().astype(float)
-        else:
-            label_arrays[semantic_target] = np.full(raw_df.height, np.nan)
+        labels = raw_df.get_column(target_col).to_numpy().astype(float)
+        event_times = shared._build_event_time(raw_df, target_col, shared.TARGET_EVENT_AGE_COLUMNS[semantic_target])
+        eval_inputs[semantic_target] = {
+            "labels": labels,
+            "event_indicator": np.nan_to_num(labels, nan=0.0).astype(bool),
+            "event_times": event_times.astype(float),
+        }
 
     blend_results: dict[str, dict] = {}
-    id_col = raw_df.get_column(shared.ID_COLUMN).to_numpy()
+    blended_test_predictions: dict[str, np.ndarray] = {}
 
     for semantic_target in shared.TARGET_COLUMN_MAP:
         available_exps: list[str] = []
         score_cols: list[np.ndarray] = []
+        test_score_cols: list[np.ndarray] = []
         for exp_name in CANDIDATE_EXPS:
             scores = _load_oof_scores(exp_name, semantic_target)
-            if scores is not None and len(scores) == raw_df.height:
+            test_scores = _load_test_scores(exp_name, semantic_target)
+            if scores is not None and test_scores is not None and len(scores) == raw_df.height and len(test_scores) == test_df.height:
                 available_exps.append(exp_name)
                 score_cols.append(scores)
+                test_score_cols.append(test_scores)
 
-        labels = label_arrays[semantic_target]
+        event_indicator = eval_inputs[semantic_target]["event_indicator"]
+        event_times = eval_inputs[semantic_target]["event_times"]
 
         if not score_cols:
             blend_results[semantic_target] = {
                 "available_experiments": [],
-                "simple_avg_roc_auc": 0.5,
-                "rank_avg_roc_auc": 0.5,
+                "simple_avg_cindex": 0.5,
+                "rank_avg_cindex": 0.5,
                 "best_blend": "none",
-                "best_blend_roc_auc": 0.5,
+                "best_blend_cindex": 0.5,
             }
             continue
 
         score_matrix = np.column_stack(score_cols)
+        test_score_matrix = np.column_stack(test_score_cols)
 
         simple_blend = _blend_simple_average(score_matrix)
         rank_blend = _blend_rank_average(score_matrix)
+        simple_test_blend = _blend_simple_average(test_score_matrix)
+        rank_test_blend = _blend_rank_average(test_score_matrix)
 
-        simple_auc = _evaluate_blend(simple_blend, labels)
-        rank_auc = _evaluate_blend(rank_blend, labels)
+        simple_cindex = _evaluate_blend(simple_blend, event_indicator, event_times)
+        rank_cindex = _evaluate_blend(rank_blend, event_indicator, event_times)
 
         # Also evaluate single-best experiment
-        single_aucs: list[tuple[str, float]] = []
+        single_scores: list[tuple[str, float]] = []
         for exp_name, col in zip(available_exps, score_cols):
-            auc = _evaluate_blend(col, labels)
-            single_aucs.append((exp_name, auc))
-        best_single_exp, best_single_auc = max(single_aucs, key=lambda x: x[1])
+            cindex = _evaluate_blend(col, event_indicator, event_times)
+            single_scores.append((exp_name, cindex))
+        best_single_exp, best_single_cindex = max(single_scores, key=lambda x: x[1])
 
-        best_blend = "simple_avg" if simple_auc >= rank_auc else "rank_avg"
-        best_blend_auc = max(simple_auc, rank_auc)
+        best_blend = "simple_avg" if simple_cindex >= rank_cindex else "rank_avg"
+        best_blend_cindex = max(simple_cindex, rank_cindex)
+        blended_test_predictions[semantic_target] = simple_test_blend if best_blend == "simple_avg" else rank_test_blend
 
         blend_results[semantic_target] = {
             "available_experiments": available_exps,
             "n_experiments_blended": len(available_exps),
-            "simple_avg_roc_auc": simple_auc,
-            "rank_avg_roc_auc": rank_auc,
+            "simple_avg_cindex": simple_cindex,
+            "rank_avg_cindex": rank_cindex,
             "best_single_experiment": best_single_exp,
-            "best_single_roc_auc": best_single_auc,
+            "best_single_cindex": best_single_cindex,
             "best_blend": best_blend,
-            "best_blend_roc_auc": best_blend_auc,
-            "blend_gain_over_best_single": best_blend_auc - best_single_auc,
+            "best_blend_cindex": best_blend_cindex,
+            "blend_gain_over_best_single": best_blend_cindex - best_single_cindex,
         }
 
     combined_score = float(
-        sum(v["best_blend_roc_auc"] for v in blend_results.values()) / len(blend_results)
+        0.3 * blend_results["risk_death"]["best_blend_cindex"]
+        + 0.7 * blend_results["risk_hepatic_event"]["best_blend_cindex"]
     )
 
     (OUTPUT_DIR / "blend_results.json").write_bytes(
@@ -164,11 +196,16 @@ def main() -> None:
         semantic_target: shared.evaluate_target_detailed(enriched_df, enriched_test_df, feature_columns, semantic_target)
         for semantic_target in shared.TARGET_COLUMN_MAP
     }
-    model_combined_score = float(
-        sum(r["summary"]["mean_roc_auc"] for r in target_details.values()) / len(target_details)
-    )
+    model_combined_score = shared.compute_combined_score(target_details)
 
-    # Use blended combined_score for comparison if better than model score
+    for semantic_target, scores in blended_test_predictions.items():
+        target_details[semantic_target]["test_predictions"] = pl.DataFrame(
+            {
+                shared.SUBMISSION_ID_COLUMN: test_df.get_column(shared.SUBMISSION_ID_COLUMN).to_list(),
+                f"{semantic_target}_prediction": scores.tolist(),
+            }
+        )
+
     reported_combined_score = max(combined_score, model_combined_score)
 
     (OUTPUT_DIR / "added_feature_names.txt").write_text("\n".join(added_feature_names) + "\n")
@@ -217,9 +254,9 @@ def main() -> None:
     }
     validation_summary["accepted"] = bool(validation_summary["baseline_comparison"]["accepted"])
     validation_summary["decision_reason"] = (
-        "Accepted because combined surrogate ROC AUC improved over baseline."
+        "Accepted because official weighted C-index improved over baseline."
         if validation_summary["accepted"]
-        else "Rejected because combined surrogate ROC AUC did not improve over baseline."
+        else "Rejected because official weighted C-index did not improve over baseline."
     )
     metrics_payload = {
         "combined_score": reported_combined_score,
@@ -227,9 +264,9 @@ def main() -> None:
         "model_combined_score": model_combined_score,
         "combined_average_precision": validation_summary["combined_average_precision"],
         "risk_hepatic_event_mean_cindex": target_details["risk_hepatic_event"]["summary"]["mean_cindex"],
-            "risk_hepatic_event_mean_roc_auc": target_details["risk_hepatic_event"]["summary"]["mean_roc_auc"],
+        "risk_hepatic_event_mean_roc_auc": target_details["risk_hepatic_event"]["summary"]["mean_roc_auc"],
         "risk_death_mean_cindex": target_details["risk_death"]["summary"]["mean_cindex"],
-            "risk_death_mean_roc_auc": target_details["risk_death"]["summary"]["mean_roc_auc"],
+        "risk_death_mean_roc_auc": target_details["risk_death"]["summary"]["mean_roc_auc"],
         "risk_hepatic_event_mean_average_precision": target_details["risk_hepatic_event"]["summary"]["mean_average_precision"],
         "risk_death_mean_average_precision": target_details["risk_death"]["summary"]["mean_average_precision"],
         "baseline_combined_score": baseline_summary["combined_score"],
@@ -288,8 +325,8 @@ def main() -> None:
     )
     for semantic_target, br in blend_results.items():
         print(
-            f"  {semantic_target}: simple_avg={br.get('simple_avg_roc_auc', 0):.6f}, "
-            f"rank_avg={br.get('rank_avg_roc_auc', 0):.6f}, "
+            f"  {semantic_target}: simple_avg_cindex={br.get('simple_avg_cindex', 0):.6f}, "
+            f"rank_avg_cindex={br.get('rank_avg_cindex', 0):.6f}, "
             f"best={br.get('best_blend', 'none')}"
         )
     print(f"Outputs written to {OUTPUT_DIR}")

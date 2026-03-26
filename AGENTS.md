@@ -16,6 +16,30 @@
 - The local raw file currently appears to encode repeated measurements in wide format with visit-style suffixes such as `_v1`, `_v2`, and so on. This is still a tabular dataset. You may engineer summaries from those columns, but do not assume a separate sequence-modeling pipeline unless the user asks for it.
 - ONLY STOP/END THE TURN WHEN YOU REACH THE STOP CONDITION SET BY THE USER: As we get deeper into research, it's expected that we will have many iterations without progress in our metric. This is completely normal. Don't get discouraged by it and just look for new angles and unexplored approaches.
 
+## Golden Rules
+
+These override all other guidance. Violating them is never justified.
+
+### Rule 1 -- Start Simple
+
+- Use the smallest viable model for early experiments.
+- A data-cleaning or feature-engineering improvement should show up on a simple baseline just as clearly as on a heavier setup, but simple runs are faster and easier to trust.
+- Only scale model complexity after the improvement landscape is understood.
+
+### Rule 2 -- Maximize Experiments Per Hour
+
+- Wall-clock time is a scarce resource.
+- For every proposed experiment, ask whether the hypothesis can be tested with a cheaper setup first.
+- If a change is orthogonal to model architecture, test it on the simplest reliable backbone before combining it with other large changes.
+- Avoid entangling multiple changes in one run. Prefer one clear variable per experiment whenever practical.
+
+### Rule 3 -- Trust Your Validation
+
+- Leak-free, consistent cross-validation is a prerequisite, not an experiment.
+- Before exploring a new modeling idea, verify that the split strategy, label handling, event-time handling, and score aggregation remain consistent with the official metric.
+- Do not introduce postprocessing or validation shortcuts that use ground truth information from the validation fold.
+- If a result is faster to obtain but weakens the validity of local validation, reject that shortcut.
+
 ## Evaluation And Validation
 
 - Before training serious models, verify the official challenge metric from the local materials or the official challenge page if available.

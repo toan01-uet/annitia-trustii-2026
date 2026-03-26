@@ -35,3 +35,11 @@
 - [x] Separate-model versus shared-backbone comparison
 - [x] Target transform and calibration search
 - [x] Rank-oriented blending and ensemble search
+- [x] Accepted-only curated feature-stack recombination search
+- [x] Target-specific pruning pass on exp035 core
+- [x] CatBoost and XGBoost model-class sweep on exp035 core
+- [x] Light CatBoost refinement around the exp037 frontier
+- [x] Focused LightGBM plus CatBoost blend on the exp035 core
+- [x] Submission export for the best post-exp037 candidate
+- [x] Canonical endpoint-specific ensemble from the exp040 result
+- [x] Focused death-side LightGBM tuning with hepatic CatBoost fixed

@@ -1,0 +1,18 @@
+{
+  "master_table": "tmp/error_analysis_outputs/master_error_analysis_table.csv",
+  "summary": "tmp/error_analysis_outputs/error_analysis_summary.md",
+  "targets": {
+    "hepatic": {
+      "decile_summary": "tmp/error_analysis_outputs/hepatic_decile_summary.csv",
+      "subgroup_summary": "tmp/error_analysis_outputs/hepatic_subgroup_summary.csv",
+      "hard_false_negatives": "tmp/error_analysis_outputs/hepatic_hard_false_negatives.csv",
+      "hard_false_positives": "tmp/error_analysis_outputs/hepatic_hard_false_positives.csv"
+    },
+    "death": {
+      "decile_summary": "tmp/error_analysis_outputs/death_decile_summary.csv",
+      "subgroup_summary": "tmp/error_analysis_outputs/death_subgroup_summary.csv",
+      "hard_false_negatives": "tmp/error_analysis_outputs/death_hard_false_negatives.csv",
+      "hard_false_positives": "tmp/error_analysis_outputs/death_hard_false_positives.csv"
+    }
+  }
+}

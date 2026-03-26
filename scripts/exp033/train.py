@@ -61,9 +61,7 @@ def main() -> None:
         for semantic_target in shared.TARGET_COLUMN_MAP
     }
 
-    raw_combined = float(
-        sum(r["summary"]["mean_roc_auc"] for r in target_details.values()) / len(target_details)
-    )
+    raw_combined = shared.compute_combined_score(target_details)
 
     # Post-hoc global isotonic calibration comparison (optimistic but illustrative)
     calibration_results: dict[str, dict] = {}
@@ -125,7 +123,7 @@ def main() -> None:
             "calibration_results": calibration_results,
             "note": (
                 "Calibrated scores use global in-sample isotonic regression (optimistic upper bound). "
-                "The official combined_score uses raw OOF AUC."
+                "The official combined_score uses raw weighted C-index from OOF predictions."
             ),
         },
     )
@@ -161,17 +159,17 @@ def main() -> None:
     }
     validation_summary["accepted"] = bool(validation_summary["baseline_comparison"]["accepted"])
     validation_summary["decision_reason"] = (
-        "Accepted because combined surrogate ROC AUC improved over baseline."
+        "Accepted because official weighted C-index improved over baseline."
         if validation_summary["accepted"]
-        else "Rejected because combined surrogate ROC AUC did not improve over baseline."
+        else "Rejected because official weighted C-index did not improve over baseline."
     )
     metrics_payload = {
         "combined_score": validation_summary["combined_score"],
         "combined_average_precision": validation_summary["combined_average_precision"],
         "risk_hepatic_event_mean_cindex": target_details["risk_hepatic_event"]["summary"]["mean_cindex"],
-            "risk_hepatic_event_mean_roc_auc": target_details["risk_hepatic_event"]["summary"]["mean_roc_auc"],
+        "risk_hepatic_event_mean_roc_auc": target_details["risk_hepatic_event"]["summary"]["mean_roc_auc"],
         "risk_death_mean_cindex": target_details["risk_death"]["summary"]["mean_cindex"],
-            "risk_death_mean_roc_auc": target_details["risk_death"]["summary"]["mean_roc_auc"],
+        "risk_death_mean_roc_auc": target_details["risk_death"]["summary"]["mean_roc_auc"],
         "risk_hepatic_event_mean_average_precision": target_details["risk_hepatic_event"]["summary"]["mean_average_precision"],
         "risk_death_mean_average_precision": target_details["risk_death"]["summary"]["mean_average_precision"],
         "baseline_combined_score": baseline_summary["combined_score"],
@@ -231,7 +229,8 @@ def main() -> None:
     )
     for semantic_target, target_result in target_details.items():
         print(
-            f"  {semantic_target}: roc_auc={target_result['summary']['mean_roc_auc']:.6f}, "
+            f"  {semantic_target}: cindex={target_result['summary']['mean_cindex']:.6f}, "
+            f"roc_auc={target_result['summary']['mean_roc_auc']:.6f}, "
             f"average_precision={target_result['summary']['mean_average_precision']:.6f}"
         )
     print(f"Outputs written to {OUTPUT_DIR}")
