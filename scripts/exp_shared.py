@@ -12,6 +12,7 @@ import polars as pl
 import wandb
 from lightgbm import LGBMClassifier
 from sklearn.metrics import average_precision_score, roc_auc_score
+from sksurv.metrics import concordance_index_censored
 from sklearn.model_selection import StratifiedKFold
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ TARGET_EVENT_AGE_COLUMNS = {
 LEAKAGE_COLUMNS = set(TARGET_COLUMN_MAP.values()) | set(TARGET_EVENT_AGE_COLUMNS.values())
 NON_FEATURE_COLUMNS = {ID_COLUMN, SUBMISSION_ID_COLUMN} | LEAKAGE_COLUMNS
 VISIT_PATTERN = re.compile(r"^(?P<base>.+)_v(?P<visit>\d+)$")
-PRIMARY_VALIDATION_METRIC = "roc_auc_surrogate"
+PRIMARY_VALIDATION_METRIC = "cindex_weighted"
 DEFAULT_WANDB_PROJECT = "annitia-trustii-2026"
 DEFAULT_RANDOM_STATE = 7
 DEFAULT_FOLDS = 5
@@ -278,6 +279,47 @@ def evaluate_target(
     }
 
 
+def _build_event_time(
+    raw_df: pl.DataFrame,
+    event_col: str,
+    age_occur_col: str,
+) -> np.ndarray:
+    """Return per-row time-to-event (age at event) or last-observed age (censored).
+
+    For patients who had the event their age-at-occurrence is used.
+    For censored patients (event=0) the last non-null visit age is used as the
+    censoring time so that concordance_index_censored gets a valid time axis.
+    """
+    age_cols = visit_column_groups(raw_df.columns).get("Age", [])
+    last_age_expr = (
+        pl.concat_list([pl.col(c).cast(pl.Float64, strict=False) for c in age_cols])
+        .list.drop_nulls()
+        .list.last()
+        if age_cols
+        else pl.lit(None, dtype=pl.Float64)
+    )
+    times = (
+        raw_df.lazy()
+        .with_columns([
+            pl.col(event_col).cast(pl.Float64, strict=False).alias("_evt"),
+            pl.col(age_occur_col).cast(pl.Float64, strict=False).alias("_age_occur"),
+            last_age_expr.alias("_last_age"),
+        ])
+        .select(
+            pl.when(pl.col("_evt") == 1.0)
+            .then(pl.col("_age_occur"))
+            .otherwise(pl.col("_last_age"))
+            .fill_null(0.0)
+            .alias("event_time")
+        )
+        .collect()
+        .get_column("event_time")
+        .to_numpy()
+        .astype(np.float64)
+    )
+    return times
+
+
 def evaluate_target_detailed(
     raw_df: pl.DataFrame,
     test_df: pl.DataFrame | None,
@@ -285,7 +327,15 @@ def evaluate_target_detailed(
     semantic_target: str,
 ) -> dict[str, Any]:
     raw_target = TARGET_COLUMN_MAP[semantic_target]
+    age_occur_col = TARGET_EVENT_AGE_COLUMNS[semantic_target]
     features, target, row_ids = target_ready_frame(raw_df, feature_columns, raw_target)
+
+    # Build event times aligned to the (non-null-target) subset
+    kept_mask = raw_df.get_column(raw_target).is_not_null().to_numpy()
+    all_event_times = _build_event_time(raw_df, raw_target, age_occur_col)
+    event_times = all_event_times[kept_mask]
+    event_indicator = target.astype(bool)
+
     split = StratifiedKFold(n_splits=DEFAULT_FOLDS, shuffle=True, random_state=DEFAULT_RANDOM_STATE)
     oof_scores = np.zeros(len(target), dtype=np.float64)
     fold_summaries: list[dict[str, Any]] = []
@@ -300,9 +350,15 @@ def evaluate_target_detailed(
         model.fit(features[train_index], target[train_index])
         probabilities = model.predict_proba(features[valid_index])[:, 1]
         oof_scores[valid_index] = probabilities
+        fold_ci, *_ = concordance_index_censored(
+            event_indicator[valid_index],
+            event_times[valid_index],
+            probabilities,
+        )
         fold_summaries.append(
             {
                 "fold": fold_index,
+                "cindex": float(fold_ci),
                 "roc_auc": float(roc_auc_score(target[valid_index], probabilities)),
                 "average_precision": float(average_precision_score(target[valid_index], probabilities)),
                 "row_count": int(len(valid_index)),
@@ -320,6 +376,8 @@ def evaluate_target_detailed(
         }
     ).sort("importance", descending=True)
 
+    oof_ci, *_ = concordance_index_censored(event_indicator, event_times, oof_scores)
+
     detailed_payload: dict[str, Any] = {
         "summary": {
             "semantic_target": semantic_target,
@@ -327,6 +385,7 @@ def evaluate_target_detailed(
             "row_count": int(len(target)),
             "positive_count": int(target.sum()),
             "null_excluded_count": int(raw_df.height - len(target)),
+            "mean_cindex": float(oof_ci),
             "mean_roc_auc": float(roc_auc_score(target, oof_scores)),
             "mean_average_precision": float(average_precision_score(target, oof_scores)),
             "folds": fold_summaries,
@@ -353,12 +412,20 @@ def evaluate_target_detailed(
     return detailed_payload
 
 
+def compute_combined_score(target_details: dict[str, Any]) -> float:
+    """Official challenge score: 0.3 * C-index_death + 0.7 * C-index_hepatic."""
+    return float(
+        0.3 * target_details["risk_death"]["summary"]["mean_cindex"]
+        + 0.7 * target_details["risk_hepatic_event"]["summary"]["mean_cindex"]
+    )
+
+
 def evaluate_experiment(raw_df: pl.DataFrame, feature_columns: list[str]) -> dict[str, Any]:
     target_results = {
         semantic_target: evaluate_target(raw_df, feature_columns, semantic_target)
         for semantic_target in TARGET_COLUMN_MAP
     }
-    combined_score = float(np.mean([result["mean_roc_auc"] for result in target_results.values()]))
+    combined_score = compute_combined_score({k: {"summary": v} for k, v in target_results.items()})
     combined_average_precision = float(np.mean([result["mean_average_precision"] for result in target_results.values()]))
     return {
         "generated_at_utc": now_utc_iso(),
@@ -392,6 +459,7 @@ def build_fold_scores_table(target_results: dict[str, Any]) -> pl.DataFrame:
                 {
                     "target": semantic_target,
                     "fold": fold_summary["fold"],
+                    "cindex": fold_summary.get("cindex", float("nan")),
                     "roc_auc": fold_summary["roc_auc"],
                     "average_precision": fold_summary["average_precision"],
                     "row_count": fold_summary["row_count"],
@@ -482,11 +550,13 @@ def log_experiment_to_wandb(
     run.log(
         {
             "combined_score": summary["combined_score"],
-            "combined_average_precision": summary["combined_average_precision"],
-            "risk_hepatic_event_mean_roc_auc": summary["targets"]["risk_hepatic_event"]["mean_roc_auc"],
-            "risk_death_mean_roc_auc": summary["targets"]["risk_death"]["mean_roc_auc"],
-            "risk_hepatic_event_mean_average_precision": summary["targets"]["risk_hepatic_event"]["mean_average_precision"],
-            "risk_death_mean_average_precision": summary["targets"]["risk_death"]["mean_average_precision"],
+            "combined_average_precision": summary.get("combined_average_precision", float("nan")),
+            "risk_hepatic_event_mean_cindex": summary["targets"]["risk_hepatic_event"].get("mean_cindex", float("nan")),
+            "risk_death_mean_cindex": summary["targets"]["risk_death"].get("mean_cindex", float("nan")),
+            "risk_hepatic_event_mean_roc_auc": summary["targets"]["risk_hepatic_event"].get("mean_roc_auc", float("nan")),
+            "risk_death_mean_roc_auc": summary["targets"]["risk_death"].get("mean_roc_auc", float("nan")),
+            "risk_hepatic_event_mean_average_precision": summary["targets"]["risk_hepatic_event"].get("mean_average_precision", float("nan")),
+            "risk_death_mean_average_precision": summary["targets"]["risk_death"].get("mean_average_precision", float("nan")),
         }
     )
     run.summary.update(
@@ -610,26 +680,36 @@ def add_visit_recency_persistence_features(df: pl.DataFrame) -> tuple[pl.DataFra
 
 
 def add_visit_missingness_trajectory_features(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    """Compute first/last observed visit index and span per biomarker group.
+
+    Uses concat_list + list ops to avoid deeply-nested when/then expression
+    trees that cause memory spikes with many visit columns.
+    """
     visit_groups = visit_column_groups(df.columns)
-    exprs: list[pl.Expr] = []
+    select_exprs: list[pl.Expr] = []
     names: list[str] = []
     for base, cols in visit_groups.items():
-        first_visit_expr = pl.lit(0.0)
-        last_visit_expr = pl.lit(0.0)
-        for i, c in enumerate(cols, start=1):
-            not_null = pl.col(c).is_not_null()
-            first_visit_expr = pl.when(first_visit_expr == 0.0).then(pl.when(not_null).then(pl.lit(float(i))).otherwise(pl.lit(0.0))).otherwise(first_visit_expr)
-            last_visit_expr = pl.when(not_null).then(pl.lit(float(i))).otherwise(last_visit_expr)
+        # Build a Float64 list: visit index where non-null, else null
+        nullable_indices = pl.concat_list([
+            pl.when(pl.col(c).is_not_null())
+            .then(pl.lit(float(i), dtype=pl.Float64))
+            .otherwise(pl.lit(None, dtype=pl.Float64))
+            for i, c in enumerate(cols, start=1)
+        ])
+        observed = nullable_indices.list.drop_nulls()
+        first_obs = observed.list.first().fill_null(0.0)
+        last_obs = observed.list.last().fill_null(0.0)
+
         fov_name = f"{base}_first_observed_visit"
         lov_name = f"{base}_last_observed_visit"
         span_name = f"{base}_obs_span"
-        exprs.append(first_visit_expr.alias(fov_name))
-        exprs.append(last_visit_expr.alias(lov_name))
-        exprs.append((last_visit_expr - first_visit_expr).alias(span_name))
+        select_exprs.append(first_obs.alias(fov_name))
+        select_exprs.append(last_obs.alias(lov_name))
+        select_exprs.append((last_obs - first_obs).alias(span_name))
         names.extend([fov_name, lov_name, span_name])
-    if not exprs:
+    if not select_exprs:
         return df, []
-    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *exprs).collect()
+    feature_frame = df.lazy().select(pl.col(ID_COLUMN), *select_exprs).collect()
     merged = df.join(feature_frame, on=ID_COLUMN, how="left")
     return merged, names
 

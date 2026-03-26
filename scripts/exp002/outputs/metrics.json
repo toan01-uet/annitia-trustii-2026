@@ -1,10 +1,12 @@
 {
-  "baseline_combined_score": 0.7963988690923062,
+  "baseline_combined_score": 0.6790664026682304,
   "combined_average_precision": 0.25995238137148424,
-  "combined_improvement": 0.014545375269891525,
-  "combined_score": 0.8109442443621977,
+  "combined_improvement": 0.03645811683431244,
+  "combined_score": 0.7155245195025428,
   "risk_death_mean_average_precision": 0.3302907992872635,
+  "risk_death_mean_cindex": 0.577590453774153,
   "risk_death_mean_roc_auc": 0.7871261303037328,
   "risk_hepatic_event_mean_average_precision": 0.18961396345570503,
+  "risk_hepatic_event_mean_cindex": 0.7746391191004242,
   "risk_hepatic_event_mean_roc_auc": 0.8347623584206626
 }

@@ -3,6 +3,7 @@ polars
 duckdb
 pyarrow
 scikit-learn
+scikit-survival
 lightgbm
 xgboost
 catboost
@@ -12,3 +13,4 @@ jupyter
 orjson
 joblib
 wandb
+scikit-surgerycore

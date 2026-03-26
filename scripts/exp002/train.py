@@ -52,7 +52,7 @@ def main() -> None:
         "experiment_dir": str(EXPERIMENT_DIR.relative_to(PROJECT_ROOT)),
         "official_metric_confirmed": False,
         "primary_validation_metric": shared.PRIMARY_VALIDATION_METRIC,
-        "metric_note": "Official challenge metric not confirmed from accessible local materials; using ROC AUC as a ranking-oriented surrogate.",
+        "metric_note": "Official metric: 0.3 * C-index_death + 0.7 * C-index_hepatic (concordance_index_censored from scikit-survival).",
         "split_strategy": f"StratifiedKFold(n_splits={shared.DEFAULT_FOLDS}, shuffle=True, random_state={shared.DEFAULT_RANDOM_STATE})",
         "feature_count": len(feature_columns),
         "added_feature_count": len(added_feature_names),
@@ -63,17 +63,13 @@ def main() -> None:
             }
             for semantic_target, result in target_details.items()
         },
-        "combined_score": float(
-            sum(result["summary"]["mean_roc_auc"] for result in target_details.values()) / len(target_details)
-        ),
+        "combined_score": shared.compute_combined_score(target_details),
         "combined_average_precision": float(
             sum(result["summary"]["mean_average_precision"] for result in target_details.values()) / len(target_details)
         ),
         "lightgbm_params": shared.LIGHTGBM_PARAMS,
         "baseline_comparison": shared.compare_against_baseline(
-            candidate_score=float(
-                sum(result["summary"]["mean_roc_auc"] for result in target_details.values()) / len(target_details)
-            ),
+            candidate_score=shared.compute_combined_score(target_details),
             baseline_score=float(baseline_summary["combined_score"]),
         ),
         "wandb_mode": shared.wandb_mode(),
@@ -88,8 +84,10 @@ def main() -> None:
     metrics_payload = {
         "combined_score": validation_summary["combined_score"],
         "combined_average_precision": validation_summary["combined_average_precision"],
-        "risk_hepatic_event_mean_roc_auc": target_details["risk_hepatic_event"]["summary"]["mean_roc_auc"],
-        "risk_death_mean_roc_auc": target_details["risk_death"]["summary"]["mean_roc_auc"],
+        "risk_hepatic_event_mean_cindex": target_details["risk_hepatic_event"]["summary"]["mean_cindex"],
+            "risk_hepatic_event_mean_roc_auc": target_details["risk_hepatic_event"]["summary"]["mean_roc_auc"],
+        "risk_death_mean_cindex": target_details["risk_death"]["summary"]["mean_cindex"],
+            "risk_death_mean_roc_auc": target_details["risk_death"]["summary"]["mean_roc_auc"],
         "risk_hepatic_event_mean_average_precision": target_details["risk_hepatic_event"]["summary"]["mean_average_precision"],
         "risk_death_mean_average_precision": target_details["risk_death"]["summary"]["mean_average_precision"],
         "baseline_combined_score": baseline_summary["combined_score"],

@@ -2,18 +2,18 @@
   "accepted": true,
   "added_feature_count": 65,
   "baseline_comparison": {
-    "absolute_improvement": 0.014545375269891525,
+    "absolute_improvement": 0.03645811683431244,
     "accepted": true,
-    "baseline_combined_score": 0.7963988690923062,
-    "candidate_combined_score": 0.8109442443621977
+    "baseline_combined_score": 0.6790664026682304,
+    "candidate_combined_score": 0.7155245195025428
   },
   "combined_average_precision": 0.25995238137148424,
-  "combined_score": 0.8109442443621977,
+  "combined_score": 0.7155245195025428,
   "decision_reason": "Accepted because combined surrogate ROC AUC improved over baseline.",
   "experiment_dir": "scripts/exp002",
   "experiment_name": "exp002_wide_visit_first_last_delta",
   "feature_count": 347,
-  "generated_at_utc": "2026-03-23T08:06:50.707692+00:00",
+  "generated_at_utc": "2026-03-26T02:34:05.620906+00:00",
   "lightgbm_params": {
     "colsample_bytree": 0.9,
     "learning_rate": 0.03,
@@ -28,15 +28,16 @@
     "subsample_freq": 1,
     "verbosity": -1
   },
-  "metric_note": "Official challenge metric not confirmed from accessible local materials; using ROC AUC as a ranking-oriented surrogate.",
+  "metric_note": "Official metric: 0.3 * C-index_death + 0.7 * C-index_hepatic (concordance_index_censored from scikit-survival).",
   "official_metric_confirmed": false,
-  "primary_validation_metric": "roc_auc_surrogate",
+  "primary_validation_metric": "cindex_weighted",
   "split_strategy": "StratifiedKFold(n_splits=5, shuffle=True, random_state=7)",
   "targets": {
     "risk_death": {
       "folds": [
         {
           "average_precision": 0.34580868343971355,
+          "cindex": 0.5021367521367521,
           "fold": 1,
           "positive_count": 15,
           "roc_auc": 0.7406593406593407,
@@ -44,6 +45,7 @@
         },
         {
           "average_precision": 0.29554432574947587,
+          "cindex": 0.6104328523862376,
           "fold": 2,
           "positive_count": 15,
           "roc_auc": 0.7754578754578755,
@@ -51,6 +53,7 @@
         },
         {
           "average_precision": 0.27804845472915646,
+          "cindex": 0.6041666666666666,
           "fold": 3,
           "positive_count": 15,
           "roc_auc": 0.7728937728937728,
@@ -58,6 +61,7 @@
         },
         {
           "average_precision": 0.41054415282759554,
+          "cindex": 0.4654320987654321,
           "fold": 4,
           "positive_count": 16,
           "roc_auc": 0.7796961325966851,
@@ -65,6 +69,7 @@
         },
         {
           "average_precision": 0.4868853726918243,
+          "cindex": 0.6891334250343879,
           "fold": 5,
           "positive_count": 15,
           "roc_auc": 0.8736648250460405,
@@ -72,6 +77,7 @@
         }
       ],
       "mean_average_precision": 0.3302907992872635,
+      "mean_cindex": 0.577590453774153,
       "mean_roc_auc": 0.7871261303037328,
       "null_excluded_count": 269,
       "positive_count": 76,
@@ -83,6 +89,7 @@
       "folds": [
         {
           "average_precision": 0.24058660703231452,
+          "cindex": 0.7643253234750462,
           "fold": 1,
           "positive_count": 9,
           "roc_auc": 0.8489439853076217,
@@ -90,6 +97,7 @@
         },
         {
           "average_precision": 0.23550822604281238,
+          "cindex": 0.7348571428571429,
           "fold": 2,
           "positive_count": 10,
           "roc_auc": 0.7767634854771784,
@@ -97,6 +105,7 @@
         },
         {
           "average_precision": 0.29122603677573705,
+          "cindex": 0.8601472134595163,
           "fold": 3,
           "positive_count": 10,
           "roc_auc": 0.8701244813278008,
@@ -104,6 +113,7 @@
         },
         {
           "average_precision": 0.12991620610311264,
+          "cindex": 0.7715008431703204,
           "fold": 4,
           "positive_count": 9,
           "roc_auc": 0.8538497003227294,
@@ -111,6 +121,7 @@
         },
         {
           "average_precision": 0.29842549991054507,
+          "cindex": 0.7631336405529954,
           "fold": 5,
           "positive_count": 9,
           "roc_auc": 0.8381742738589212,
@@ -118,6 +129,7 @@
         }
       ],
       "mean_average_precision": 0.18961396345570503,
+      "mean_cindex": 0.7746391191004242,
       "mean_roc_auc": 0.8347623584206626,
       "null_excluded_count": 0,
       "positive_count": 47,
